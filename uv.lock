@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.10"
 
 [options]
@@ -307,7 +307,7 @@ wheels = [
 
 [[package]]
 name = "treefort"
-version = "0.5.0b2"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "fire" },
