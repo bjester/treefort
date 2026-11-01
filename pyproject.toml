@@ -1,6 +1,6 @@
 [project]
 name = "treefort"
-version = "0.5.0"
+version = "0.5.1"
 description = "github CLI extension for worktrees"
 readme = "README.md"
 authors = [
