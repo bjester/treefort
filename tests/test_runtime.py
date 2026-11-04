@@ -94,6 +94,44 @@ class RuntimeTestCase(TestCase):
         remote = self.runtime.get_remote(owner_name="octo")
         self.assertEqual(remote, self.remotes[0])
 
+    def test_get_remote__owner_name_ignores_prefixed_repo_name(self):
+        self.remotes = [
+            GitRemote(
+                "repo-ghsa-j64v-3ewp-1234",
+                "git@github.com:octo/repo-ghsa-j64v-3ewp-1234.git",
+                "fetch",
+            ),
+            GitRemote(
+                "repo-ghsa-j64v-3ewp-1234",
+                "git@github.com:octo/repo-ghsa-j64v-3ewp-1234.git",
+                "push",
+            ),
+            GitRemote("origin", "git@github.com:other/repo.git", "fetch"),
+            GitRemote("origin", "git@github.com:other/repo.git", "push"),
+            GitRemote("upstream", "https://github.com/octo/repo.git", "fetch"),
+            GitRemote("upstream", "https://github.com/octo/repo.git", "push"),
+        ]
+
+        remote = self.runtime.get_remote(owner_name="octo")
+        self.assertEqual(remote, self.remotes[4])
+
+    def test_get_remote__owner_name_without_git_extension(self):
+        self.remotes = [
+            GitRemote("upstream", "https://github.com/octo/repo", "fetch"),
+        ]
+
+        remote = self.runtime.get_remote(owner_name="octo")
+        self.assertEqual(remote, self.remotes[0])
+
+    def test_get_remote__owner_name_ignores_prefixed_owner_name(self):
+        self.remotes = [
+            GitRemote("prefixed", "git@github.com:my-octo/repo.git", "fetch"),
+            GitRemote("origin", "git@github.com:octo/repo.git", "fetch"),
+        ]
+
+        remote = self.runtime.get_remote(owner_name="octo")
+        self.assertEqual(remote, self.remotes[1])
+
     def test_get_remote__name(self):
         remote = self.runtime.get_remote(name="other")
         self.assertEqual(remote, self.remotes[2])
