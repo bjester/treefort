@@ -1,5 +1,3 @@
-import re
-
 from treefort.context import Context
 from treefort.errors import RemoteUsageError
 from treefort.gh import GithubCLI
@@ -43,19 +41,18 @@ class Runtime:
     def get_remote(
         self, name: str | None = None, owner_name: str | None = None
     ) -> GitRemote | None:
-        remote_pattern = None
+        repo_name = None
         if owner_name:
             config = self.context.get_config()
             # forks could be renamed, but we're not gonna worry about that for now
-            remote_ref = f"{owner_name}/{config.name}"
-            remote_pattern = re.compile(rf"(?:^|[:/]){re.escape(remote_ref)}(?:\.git)?/?$")
+            repo_name = config.name
         elif not name:
             raise RemoteUsageError("Must provide either owner_name or name")
 
         for remote in self.git.remote():
             if remote.type != "fetch":
                 continue
-            if (remote_pattern and remote_pattern.search(remote.uri)) or (
+            if (owner_name and repo_name and remote.matches(owner_name, repo_name)) or (
                 name and name == remote.name
             ):
                 return remote
