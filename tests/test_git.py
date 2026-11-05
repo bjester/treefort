@@ -5,8 +5,108 @@ from types import SimpleNamespace
 from unittest import TestCase, mock
 
 from treefort.errors import CommandError, WorktreeNameError
-from treefort.git import GitCLI, GitRemote
+from treefort.git import GitCLI, GitRemote, GitUri
 from treefort.logger import setup_logger
+
+
+class GitUriTestCase(TestCase):
+    def test_path__https_with_git_ext(self):
+        uri = GitUri("https://github.com/octo/repo.git")
+        self.assertEqual(uri.path, "octo/repo")
+        self.assertEqual(uri.owner, "octo")
+        self.assertEqual(uri.name, "repo")
+        self.assertTrue(uri.is_valid)
+
+    def test_path__https_without_git_ext_and_trailing_slash(self):
+        uri = GitUri("https://github.com/octo/repo/")
+        self.assertEqual(uri.path, "octo/repo")
+        self.assertEqual(uri.owner, "octo")
+        self.assertEqual(uri.name, "repo")
+        self.assertTrue(uri.is_valid)
+
+    def test_path__https_uppercase_git_ext_and_trailing_slash(self):
+        uri = GitUri("https://github.com/Octo/Repo.GIT/")
+        self.assertEqual(uri.path, "Octo/Repo")
+        self.assertEqual(uri.owner, "Octo")
+        self.assertEqual(uri.name, "Repo")
+        self.assertTrue(uri.is_valid)
+
+    def test_path__ssh_scp_style(self):
+        uri = GitUri("git@github.com:octo/repo.git")
+        self.assertEqual(uri.path, "octo/repo")
+        self.assertEqual(uri.owner, "octo")
+        self.assertEqual(uri.name, "repo")
+        self.assertTrue(uri.is_valid)
+
+    def test_path__ssh_scheme_url(self):
+        uri = GitUri("ssh://git@github.com/octo/repo.git")
+        self.assertEqual(uri.path, "octo/repo")
+        self.assertEqual(uri.owner, "octo")
+        self.assertEqual(uri.name, "repo")
+        self.assertTrue(uri.is_valid)
+
+    def test_path__shorthand_owner_repo(self):
+        uri = GitUri("octo/repo")
+        self.assertEqual(uri.path, "octo/repo")
+        self.assertEqual(uri.owner, "octo")
+        self.assertEqual(uri.name, "repo")
+        self.assertTrue(uri.is_valid)
+
+    def test_is_valid__rejects_multi_segment_and_single_segment_paths(self):
+        pr_uri = GitUri("https://github.com/octo/repo/pull/1234")
+        self.assertEqual(pr_uri.owner, "octo")
+        self.assertEqual(pr_uri.name, "repo")
+        self.assertFalse(pr_uri.is_valid)
+
+        single_uri = GitUri("uri")
+        self.assertEqual(single_uri.owner, "uri")
+        self.assertEqual(single_uri.name, "")
+        self.assertFalse(single_uri.is_valid)
+
+    def test_matches__case_insensitive_and_strict_boundaries(self):
+        uri = GitUri("git@github.com:LearningEquality/Kolibri.git")
+        self.assertTrue(uri.matches("learningequality", "kolibri"))
+        self.assertTrue(uri.matches("LEARNINGEQUALITY", "KOLIBRI"))
+        self.assertFalse(uri.matches("my-learningequality", "kolibri"))
+        self.assertFalse(uri.matches("learningequality", "kolibri-ghsa-1234"))
+
+        pr_uri = GitUri("https://github.com/octo/repo/pull/1234")
+        self.assertFalse(pr_uri.matches("octo", "repo"))
+
+    def test_eq_hash_and_repr(self):
+        uri_a = GitUri("https://github.com/octo/repo.git")
+        uri_b = GitUri("https://github.com/octo/repo.git")
+        uri_c = GitUri("git@github.com:octo/repo.git")
+        self.assertEqual(uri_a, uri_b)
+        self.assertNotEqual(uri_a, uri_c)
+        self.assertNotEqual(uri_a, "https://github.com/octo/repo.git")
+        self.assertEqual(hash(uri_a), hash(uri_b))
+        self.assertEqual(len({uri_a, uri_b, uri_c}), 2)
+        self.assertEqual(repr(uri_a), "GitUri(uri='https://github.com/octo/repo.git')")
+
+
+class GitRemoteTestCase(TestCase):
+    def test_properties_and_matches(self):
+        remote = GitRemote("origin", "git@github.com:Octo/Repo.git", "fetch")
+        self.assertEqual(remote.git_uri, GitUri("git@github.com:Octo/Repo.git"))
+        self.assertEqual(remote.owner, "Octo")
+        self.assertEqual(remote.repo_name, "Repo")
+        self.assertTrue(remote.matches("octo", "repo"))
+        self.assertFalse(remote.matches("other", "repo"))
+
+    def test_eq_hash_and_repr(self):
+        remote_a = GitRemote("origin", "https://github.com/octo/repo.git", "fetch")
+        remote_b = GitRemote("origin", "https://github.com/octo/repo.git", "fetch")
+        remote_c = GitRemote("origin", "https://github.com/octo/repo.git", "push")
+        self.assertEqual(remote_a, remote_b)
+        self.assertNotEqual(remote_a, remote_c)
+        self.assertNotEqual(remote_a, ("origin", "https://github.com/octo/repo.git", "fetch"))
+        self.assertEqual(hash(remote_a), hash(remote_b))
+        self.assertEqual(len({remote_a, remote_b, remote_c}), 2)
+        self.assertEqual(
+            repr(remote_a),
+            "GitRemote(name='origin', uri='https://github.com/octo/repo.git', type='fetch')",
+        )
 
 
 class GitCLITestCase(TestCase):
