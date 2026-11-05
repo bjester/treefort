@@ -1,53 +1,51 @@
 import re
-from urllib import parse
 
 from treefort.command import Command
 from treefort.config import RepositoryConfig, TomlConfigIO
 from treefort.errors import ProjectExistsError, RepositoryPathError
+from treefort.git import GitUri
 from treefort.hooks import Hook, HookExists
 from treefort.templates import TemplateExists
 
 JUST_PATH_RE = re.compile(r"^[\w\-_]+/[\w\-_]+$")
-GIT_EXT_RE = re.compile(r"\.git$")
 
 
 def normalize(repo: str):
+    repo = repo.rstrip("/")
     if not repo.startswith("http") and not repo.startswith("git@"):
         if not JUST_PATH_RE.match(repo):
             raise RepositoryPathError("Invalid repository path format. Expected: {owner}/{repo}")
         repo = f"https://github.com/{repo}"
 
-    if not repo.endswith(".git"):
+    if not repo.lower().endswith(".git"):
         repo += ".git"
 
     return repo
 
 
 class RepositoryTarget:
+    __slots__ = ("uri", "_git_uri", "_destination_dir")
+
     def __init__(self, repo: str, destination_dir: str | None = None):
         self.uri = normalize(repo)
+        self._git_uri = GitUri(self.uri)
         self._destination_dir = destination_dir
 
     def validate(self):
-        path_parts = self.path.split("/")
-        if len(path_parts) != 2:
+        if not self._git_uri.is_valid:
             raise RepositoryPathError(f"Invalid repository path: {self.path}")
 
     @property
     def path(self):
-        if self.uri.startswith("http"):
-            return parse.urlparse(self.uri).path.lstrip("/")
-        # must be ssh
-        _, path = self.uri.split(":")
-        return path.lstrip("/")
+        return self._git_uri.path
 
     @property
     def owner(self):
-        return self.path.split("/")[0]
+        return self._git_uri.owner
 
     @property
     def name(self):
-        return re.sub(GIT_EXT_RE, "", self.path.split("/")[1])
+        return self._git_uri.name
 
     @property
     def destination_dir(self):
