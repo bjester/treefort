@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import ANY, Mock
 
-from treefort.commands.checkout import CheckoutCommand
+from treefort.commands.checkout import CheckoutCommand, CheckoutInput
 from treefort.errors import BranchInputError, CommandError, RemoteNotFoundError
 from treefort.git import GitRemote
 from treefort.hooks import Hook
@@ -25,6 +25,58 @@ class StubContext:
     @contextmanager
     def use(self, cwd):
         yield
+
+
+class CheckoutInputTestCase(TestCase):
+    def setUp(self):
+        self.config = SimpleNamespace(
+            url="https://github.com/Octo/Repo",
+            owner="Octo",
+            name="Repo",
+        )
+        self.context = StubContext(Path("/repo"), self.config)
+        self.runtime = SimpleNamespace(
+            context=self.context,
+            get_remote=Mock(return_value=None),
+        )
+
+    def test_owner__pr_number_returns_config_owner(self):
+        inpt = CheckoutInput(self.runtime, "1234")
+        self.assertEqual(inpt.owner, "Octo")
+
+    def test_owner__pr_url_matches_config_url_case_insensitively(self):
+        inpt = CheckoutInput(self.runtime, "https://github.com/octo/repo/pull/1234")
+        self.assertEqual(inpt.owner, "Octo")
+
+    def test_owner__pr_url_extracts_fork_owner(self):
+        inpt = CheckoutInput(self.runtime, "https://github.com/fork-owner/repo/pull/1234")
+        self.assertEqual(inpt.owner, "fork-owner")
+
+    def test_owner__pr_url_does_not_match_prefixed_repo_name_as_config_url(self):
+        inpt = CheckoutInput(self.runtime, "https://github.com/octo/Repo-fork/pull/1234")
+        self.assertEqual(inpt.owner, "octo")
+
+    def test_owner__remote_name_extracts_owner_from_ssh_remote(self):
+        self.runtime.get_remote.return_value = GitRemote(
+            "upstream", "git@github.com:fork-owner/repo.git", "fetch"
+        )
+        inpt = CheckoutInput(self.runtime, "feature", remote_name="upstream")
+        self.assertEqual(inpt.owner, "fork-owner")
+        self.runtime.get_remote.assert_called_once_with(name="upstream")
+
+    def test_owner__remote_name_extracts_owner_from_https_remote(self):
+        self.runtime.get_remote.return_value = GitRemote(
+            "upstream", "https://github.com/fork-owner/repo.git", "fetch"
+        )
+        inpt = CheckoutInput(self.runtime, "feature", remote_name="upstream")
+        self.assertEqual(inpt.owner, "fork-owner")
+        self.runtime.get_remote.assert_called_once_with(name="upstream")
+
+    def test_owner__remote_name_raises_when_remote_not_found(self):
+        self.runtime.get_remote.return_value = None
+        inpt = CheckoutInput(self.runtime, "feature", remote_name="missing")
+        with self.assertRaises(RemoteNotFoundError):
+            _ = inpt.owner
 
 
 class CheckoutCommandTestCase(TestCase):
