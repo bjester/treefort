@@ -132,6 +132,22 @@ class RuntimeTestCase(TestCase):
         remote = self.runtime.get_remote(owner_name="octo")
         self.assertEqual(remote, self.remotes[1])
 
+    def test_get_remote__owner_name_case_insensitive_and_trailing_slash(self):
+        self.config = SimpleNamespace(owner="LearningEquality", name="kolibri")
+        self.remotes = [
+            GitRemote("origin", "git@github.com:learningequality/Kolibri.git", "fetch"),
+            GitRemote("upstream", "https://github.com/LearningEquality/KOLIBRI/", "fetch"),
+        ]
+
+        self.assertEqual(
+            self.runtime.get_remote(owner_name="LearningEquality"),
+            self.remotes[0],
+        )
+        self.assertEqual(
+            self.runtime.get_remote(owner_name="LEARNINGEQUALITY"),
+            self.remotes[0],
+        )
+
     def test_get_remote__name(self):
         remote = self.runtime.get_remote(name="other")
         self.assertEqual(remote, self.remotes[2])

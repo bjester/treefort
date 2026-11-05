@@ -59,6 +59,16 @@ class NormalizeTestCase(TestCase):
             "git@github.com:octo/repo.git",
         )
 
+    def test_trailing_slash(self):
+        self.assertEqual(
+            normalize("https://github.com/octo/repo/"),
+            "https://github.com/octo/repo.git",
+        )
+        self.assertEqual(
+            normalize("octo/repo/"),
+            "https://github.com/octo/repo.git",
+        )
+
     def test_invalid_repo(self):
         with self.assertRaisesRegex(RepositoryPathError, "Invalid repository path format"):
             normalize("not a repo")
@@ -71,26 +81,31 @@ class RepositoryTargetTestCase(TestCase):
 
     def test_validate__invalid_path(self):
         target = RepositoryTarget("https://github.com/octo/repo/pull/123.git")
-        with self.assertRaises(
-            RepositoryPathError, msg="Invalid repository path: octo/repo/pull/123"
+        with self.assertRaisesRegex(
+            RepositoryPathError, "^Invalid repository path: octo/repo/pull/123$"
         ):
             target.validate()
 
     def test_path__url(self):
         target = RepositoryTarget("https://github.com/octo/repo.git")
-        self.assertEqual(target.path, "octo/repo.git")
+        self.assertEqual(target.path, "octo/repo")
 
     def test_path__ssh(self):
         target = RepositoryTarget("git@github.com:octo/repo.git")
-        self.assertEqual(target.path, "octo/repo.git")
+        self.assertEqual(target.path, "octo/repo")
 
     def test_path__owner_repo(self):
         target = RepositoryTarget("octo/repo")
-        self.assertEqual(target.path, "octo/repo.git")
+        self.assertEqual(target.path, "octo/repo")
 
     def test_owner(self):
         target = RepositoryTarget("https://github.com/octo/repo.git")
         self.assertEqual(target.owner, "octo")
+
+    def test_owner__ssh(self):
+        target = RepositoryTarget("git@github.com:octo/repo.git")
+        self.assertEqual(target.owner, "octo")
+        self.assertEqual(target.name, "repo")
 
     def test_repo(self):
         target = RepositoryTarget("https://github.com/octo/repo.git")

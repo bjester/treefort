@@ -3,6 +3,7 @@ from functools import cached_property
 
 from treefort.command import Command
 from treefort.errors import BranchInputError, CommandError, RemoteNotFoundError, RemoteUsageError
+from treefort.git import GitUri
 from treefort.hooks import Hook
 from treefort.runtime import Runtime
 from treefort.utils import normalize_worktree_name
@@ -38,20 +39,19 @@ class CheckoutInput:
     def owner(self) -> str:
         """The Github owner of the repository"""
         config = self.runtime.context.get_config()
-        if (
-            self.branch_or_pr.isdigit()
-            or self.branch_or_pr.startswith(config.url)
-            or not self.remote_name
-        ):
+        config_url_prefix = f"{config.url.rstrip('/').lower()}/"
+        if self.branch_or_pr.isdigit() or self.branch_or_pr.lower().startswith(config_url_prefix):
             return config.owner
         elif URL_RE.match(self.branch_or_pr):
-            return self.branch_or_pr.replace("https://github.com/", "").split("/", 1)[0]
+            return GitUri(self.branch_or_pr).owner
+        elif not self.remote_name:
+            return config.owner
 
         remote = self.runtime.get_remote(name=self.remote_name)
         if not remote:
             raise RemoteNotFoundError("Couldn't find matching remote for --remote input")
 
-        return remote.uri.replace("https://github.com/", "").split("/", 1)[0]
+        return remote.owner
 
     @cached_property
     def remote(self) -> str:

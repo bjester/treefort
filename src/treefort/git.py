@@ -1,15 +1,100 @@
 import re
 import subprocess
-from collections import namedtuple
 from collections.abc import Iterator
 from pathlib import Path
+from urllib import parse
 
 from treefort.errors import CommandError, WorktreeNameError
 from treefort.subprocess import SubprocessOperator
 
 TYPE_RE = re.compile(r"\((.*)\)")
+GIT_EXT_RE = re.compile(r"\.git$", re.IGNORECASE)
 
-GitRemote = namedtuple("GitRemote", ["name", "uri", "type"])
+
+class GitUri:
+    """Value object for parsing and matching GitHub repository URIs."""
+
+    __slots__ = ("uri",)
+
+    def __init__(self, uri: str):
+        self.uri = uri
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, GitUri):
+            return NotImplemented
+        return self.uri == other.uri
+
+    def __hash__(self) -> int:
+        return hash(self.uri)
+
+    def __repr__(self) -> str:
+        return f"GitUri(uri={self.uri!r})"
+
+    @property
+    def path(self) -> str:
+        if "://" in self.uri:
+            raw_path = parse.urlparse(self.uri).path.strip("/")
+        elif ":" in self.uri:
+            raw_path = self.uri.split(":", 1)[1].strip("/")
+        else:
+            raw_path = self.uri.strip("/")
+        return re.sub(GIT_EXT_RE, "", raw_path)
+
+    @property
+    def owner(self) -> str:
+        return self.path.split("/", 1)[0]
+
+    @property
+    def name(self) -> str:
+        parts = self.path.split("/")
+        return parts[1] if len(parts) > 1 else ""
+
+    @property
+    def is_valid(self) -> bool:
+        parts = self.path.split("/")
+        return len(parts) == 2 and bool(parts[0]) and bool(parts[1])
+
+    def matches(self, owner: str, name: str) -> bool:
+        return (
+            self.is_valid
+            and self.owner.lower() == owner.lower()
+            and self.name.lower() == name.lower()
+        )
+
+
+class GitRemote:
+    __slots__ = ("name", "uri", "type")
+
+    def __init__(self, name: str, uri: str, remote_type: str):
+        self.name = name
+        self.uri = uri
+        self.type = remote_type
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, GitRemote):
+            return NotImplemented
+        return (self.name, self.uri, self.type) == (other.name, other.uri, other.type)
+
+    def __hash__(self) -> int:
+        return hash((self.name, self.uri, self.type))
+
+    def __repr__(self) -> str:
+        return f"GitRemote(name={self.name!r}, uri={self.uri!r}, type={self.type!r})"
+
+    @property
+    def git_uri(self) -> GitUri:
+        return GitUri(self.uri)
+
+    @property
+    def owner(self) -> str:
+        return self.git_uri.owner
+
+    @property
+    def repo_name(self) -> str:
+        return self.git_uri.name
+
+    def matches(self, owner: str, name: str) -> bool:
+        return self.git_uri.matches(owner, name)
 
 
 class GitCLI(SubprocessOperator):
