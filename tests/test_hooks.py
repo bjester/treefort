@@ -15,6 +15,14 @@ class HooksTestCase(TestCase):
     def setUp(self):
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.tmp_path = Path(self.tmp_dir.name)
+
+        # isolate the global configuration so tests never write to the developer's ~/.treefort
+        self.home_dir = self.tmp_path / "home"
+        self.home_dir.mkdir()
+        home_patcher = mock.patch.dict(os.environ, {"HOME": str(self.home_dir)})
+        home_patcher.start()
+        self.addCleanup(home_patcher.stop)
+
         self.context = Context()
         self.context.cwd = self.tmp_path
         self.hooks_path = self.tmp_path / ".treefort" / "hooks"
