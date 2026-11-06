@@ -1,4 +1,4 @@
-name: integration-test
+name: e2e-test
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         python-version:
@@ -28,7 +29,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --group dev
 
-      - name: Run integration test
-        run: bash scripts/integration_test.sh
+      - name: Run E2E tests
+        run: bash scripts/e2e_test.sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
