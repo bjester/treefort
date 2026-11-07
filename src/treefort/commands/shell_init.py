@@ -25,6 +25,7 @@ class ShellInitCommand(Command):
     """Emit shell integration for the treefort command"""
 
     _name = "shell-init"
+    _literal_args = ("shell", "cmd")
 
     def __init__(self, runtime: Runtime, cli: "WorktreeCommands"):
         super().__init__(runtime)

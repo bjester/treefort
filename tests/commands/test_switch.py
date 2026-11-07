@@ -103,6 +103,19 @@ class SwitchCommandTestCase(TestCase):
 
         self.assertEqual(cd_file.read_text(encoding="utf-8"), f"{self.project_dir / 'feature-a'}\n")
 
+    def test_call__resolves_numeric_worktree_name(self):
+        # cli.replace_literal_args keeps the raw text; a worktree named after an issue number
+        # must not be mistaken for an int by fire's literal evaluation.
+        (self.project_dir / "125").mkdir()
+        self.git.list_worktrees.return_value = [
+            *self.worktree_listing(),
+            self.record("125", f"{BRANCH_REF_PREFIX}125"),
+        ]
+
+        cd_file = self.switch("125")
+
+        self.assertEqual(cd_file.read_text(encoding="utf-8"), f"{self.project_dir / '125'}\n")
+
     def test_call__resolves_checked_out_branch_name(self):
         self.git.list_worktrees.return_value = self.worktree_listing()
 
@@ -123,6 +136,8 @@ class SwitchCommandTestCase(TestCase):
         self.assertEqual(cd_file.read_text(encoding="utf-8"), f"{self.project_dir / 'feature-a'}\n")
 
     def test_call__raises_without_previous_worktree(self):
+        self.git.list_worktrees.return_value = self.worktree_listing()
+
         with self.assertRaisesRegex(WorktreeNotFoundError, "No previous worktree recorded"):
             self.switch("-")
 
@@ -132,16 +147,20 @@ class SwitchCommandTestCase(TestCase):
         config.update(last_worktree="gone")
         self.context.set_config(config)
 
-        with self.assertRaisesRegex(WorktreeNotFoundError, "No previous worktree recorded"):
+        with self.assertRaisesRegex(
+            WorktreeNotFoundError, "Previous worktree gone is not a worktree in this project"
+        ):
             self.switch("-")
 
     def test_call__raises_when_previous_worktree_escapes_project_dir(self):
+        self.git.list_worktrees.return_value = self.worktree_listing()
+
         for escaping_name in ("..", "../elsewhere", "/tmp"):
             config = self.load_config()
             config.update(last_worktree=escaping_name)
             self.context.set_config(config)
 
-            with self.assertRaisesRegex(WorktreeNotFoundError, "No previous worktree recorded"):
+            with self.assertRaisesRegex(WorktreeNotFoundError, "is not a worktree in this project"):
                 self.switch("-")
 
     def test_call__raises_when_previous_worktree_is_not_a_worktree(self):
@@ -153,7 +172,7 @@ class SwitchCommandTestCase(TestCase):
             config.update(last_worktree=non_worktree)
             self.context.set_config(config)
 
-            with self.assertRaisesRegex(WorktreeNotFoundError, "No previous worktree recorded"):
+            with self.assertRaisesRegex(WorktreeNotFoundError, "is not a worktree in this project"):
                 self.switch("-")
 
     def test_call__canonicalizes_previous_worktree_name(self):

@@ -10,6 +10,12 @@ class BaseCommand:
 class Command(BaseCommand):
     _name: str
     _aliases: list[str] = []
+    # Positional parameters that must receive the exact text the user typed, listed in
+    # signature order. Fire literal-evaluates arguments, so `treefort switch 125` would reach
+    # the command as an int and `switch 1.10` as a float; cli.replace_literal_args rewrites
+    # these into quoted flags. A parameter that follows a non-literal one needs extra handling,
+    # because fire fills positionals from the full signature.
+    _literal_args: tuple[str, ...] = ()
 
     def __init__(self, runtime: Runtime):
         super().__init__()

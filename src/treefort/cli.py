@@ -1,4 +1,5 @@
 import logging
+import re
 import sys
 
 import fire
@@ -23,18 +24,84 @@ def replace_alias(cli: WorktreeCommands):
         sys.argv[1] = cli._alias_map[subcommand]
 
 
-def replace_switch_dash():
+def _is_flag(token: str) -> bool:
+    """Whether fire treats the token as a flag rather than a positional argument.
+
+    Mirrors fire's rule: a single letter, or any word, after one or two hyphens; a negative
+    number such as ``-5`` stays a positional argument.
     """
-    Rewrites a bare '-' target for the `switch` subcommand into a flag argument.
+    return bool(re.match(r"^-[a-zA-Z]", token) or token.startswith("--"))
 
-    Fire reserves a lone '-' as its argument separator, so `treefort switch -` would
-    otherwise never deliver the previous-worktree shortcut to the command. Must run
-    after `replace_alias`, so the `sw` alias is already rewritten to `switch`.
 
+def _flag_parameter(token: str, names: tuple[str, ...]) -> str | None:
+    """The literal argument a flag token sets, if any.
+
+    Mirrors fire's keyword resolution: the key is the token without leading hyphens and
+    without any ``=value``, with hyphens mapped to underscores, and a single-character key is
+    a shortcut for the one argument that starts with it.
+    """
+    key = token.lstrip("-").split("=", 1)[0].replace("-", "_")
+    if key in names:
+        return key
+    if len(key) == 1:
+        matches = [name for name in names if name.startswith(key)]
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
+def _rewrite_flag(argv: list[str], index: int, names: tuple[str, ...], pending: list[str]) -> int:
+    """Quote the value of one flag token in place, returning the next index to consider."""
+    token = argv[index]
+    parameter = _flag_parameter(token, names)
+    if parameter in pending:
+        pending.remove(parameter)
+    next_token = argv[index + 1] if index + 1 < len(argv) else None
+    if "=" in token:
+        if parameter is not None:
+            key, _, value = token.partition("=")
+            argv[index] = f"{key}={value!r}"
+        return index + 1
+    if next_token is not None and not _is_flag(next_token):
+        if parameter is not None:
+            argv[index + 1] = repr(next_token)
+        return index + 2
+    return index + 1
+
+
+def replace_literal_args(cli: WorktreeCommands):
+    """
+    Rewrites the arguments of commands that need their exact text preserved.
+
+    Fire literal-evaluates every argument, so `treefort switch 125` would reach the command as
+    an int and `switch 1.10` as a float. Commands declare the positional parameters that must
+    stay text, in signature order, in `_literal_args`; their values are rewritten into
+    explicitly quoted flags, which fire parses back into the original string. Both positional
+    arguments and the flag forms fire accepts (`--name value`, `--name=value`, and the
+    single-letter shortcut) are covered, and arguments already given as flags are not filled
+    twice. Must run after `replace_alias`, so the `sw` alias is already rewritten to `switch`.
+
+    :param cli: An instance of WorktreeCommands whose commands declare literal arguments
     :return: None
     """
-    if len(sys.argv) > 2 and sys.argv[1] == "switch" and sys.argv[2] == "-":
-        sys.argv[2] = "--target=-"
+    if len(sys.argv) < 2:
+        return
+    command = next((command for command in cli._commands if command._name == sys.argv[1]), None)
+    if command is None or not command._literal_args:
+        return
+
+    pending = list(command._literal_args)
+    index = 2
+    while index < len(sys.argv):
+        token = sys.argv[index]
+        if token == "--":
+            return
+        if _is_flag(token):
+            index = _rewrite_flag(sys.argv, index, command._literal_args, pending)
+        else:
+            if pending:
+                sys.argv[index] = f"--{pending.pop(0)}={token!r}"
+            index += 1
 
 
 def replace_verbose():
@@ -73,7 +140,7 @@ def main():
     try:
         component = WorktreeCommands(verbose=is_verbose)
         replace_alias(component)
-        replace_switch_dash()
+        replace_literal_args(component)
 
         # we do not pass `name` here, because the CLI allows using an alias for the command. if name
         # was passed, then using `worktree -- --completion` would use the wrong name for completion

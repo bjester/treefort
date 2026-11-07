@@ -1,4 +1,5 @@
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from treefort import ui
@@ -8,11 +9,27 @@ from treefort.errors import WorktreeNotFoundError
 from treefort.git import LOCAL_BRANCH_REF_PREFIX
 
 
+@dataclass(frozen=True)
+class ListedWorktree:
+    """A worktree from `git worktree list` that exists on disk.
+
+    :param name: The worktree root relative to the project directory, or ``None`` when it is
+        outside the project
+    :param path: The resolved worktree root
+    :param branch: The fully qualified branch checked out in the worktree, if any
+    """
+
+    name: str | None
+    path: Path
+    branch: str | None
+
+
 class SwitchCommand(Command):
     """Switch the shell to another worktree in the current project"""
 
     _name = "switch"
     _aliases = ["sw"]
+    _literal_args = ("target",)
 
     def __call__(self, target: str):
         """
@@ -45,18 +62,18 @@ class SwitchCommand(Command):
         # `@`/`.` resolve from the current directory alone; every other target needs the
         # worktree listing, both to resolve it and to validate the previous worktree before
         # returning to it or recording the current one.
-        worktrees: list[dict] = []
+        listed: list[ListedWorktree] = []
         if target not in ("@", "."):
-            worktrees = self._runtime.git.list_worktrees()
+            listed = self._listed_worktrees(self._runtime.git.list_worktrees(), project_dir)
 
         target_path, target_name = self._resolve_target(
-            target, config, current_worktree, worktrees, project_dir
+            target, config, current_worktree, listed, project_dir
         )
 
         if (
             current_worktree is not None
             and current_worktree != target_name
-            and self._is_active_worktree(current_worktree, worktrees, project_dir)
+            and self._find_worktree(listed, current_worktree) is not None
         ):
             config.update(last_worktree=current_worktree)
             self._context.set_config(config)
@@ -80,7 +97,7 @@ class SwitchCommand(Command):
         target: str,
         config: RepositoryConfig,
         current_worktree: str | None,
-        worktrees: list[dict],
+        listed: list[ListedWorktree],
         project_dir: Path,
     ) -> tuple[Path, str | None]:
         """Resolve a switch target to its path and project-relative worktree name.
@@ -88,22 +105,22 @@ class SwitchCommand(Command):
         :param target: The worktree name, branch name, or shortcut to resolve
         :param config: The repository configuration
         :param current_worktree: The worktree the current directory is inside, if any
-        :param worktrees: The project's worktree listing
+        :param listed: The project's worktrees that exist on disk
         :param project_dir: The project directory
         :return: The target directory and its name relative to the project, or `None` when the
             target is the project root or a worktree outside the project
         :raises WorktreeNotFoundError: When the target cannot be resolved to an existing worktree
         """
         if target == "-":
-            return self._resolve_previous(config, project_dir, worktrees)
+            return self._resolve_previous(config, project_dir, listed)
         if target in ("@", "."):
             return self._resolve_current(project_dir, current_worktree)
         if target == "^":
-            return self._resolve_default_branch(config, worktrees, project_dir)
-        return self._resolve_named(target, worktrees, project_dir)
+            return self._resolve_default_branch(config, listed, project_dir)
+        return self._resolve_named(target, listed)
 
     def _resolve_previous(
-        self, config: RepositoryConfig, project_dir: Path, worktrees: list[dict]
+        self, config: RepositoryConfig, project_dir: Path, listed: list[ListedWorktree]
     ) -> tuple[Path, str | None]:
         """Resolve the previous worktree, which must still be an existing worktree.
 
@@ -115,13 +132,13 @@ class SwitchCommand(Command):
         last_worktree = config.last_worktree
         if not last_worktree:
             raise WorktreeNotFoundError("No previous worktree recorded")
-        candidate = project_dir / last_worktree
-        relative_name = self._relative_name(candidate, project_dir)
-        if relative_name is None or not self._is_active_worktree(
-            relative_name, worktrees, project_dir
-        ):
-            raise WorktreeNotFoundError("No previous worktree recorded")
-        return candidate.resolve(), relative_name
+        relative_name = self._relative_name(project_dir / last_worktree, project_dir)
+        previous = self._find_worktree(listed, relative_name) if relative_name else None
+        if previous is None:
+            raise WorktreeNotFoundError(
+                f"Previous worktree {last_worktree} is not a worktree in this project"
+            )
+        return previous.path, previous.name
 
     def _resolve_current(
         self, project_dir: Path, current_worktree: str | None
@@ -132,47 +149,52 @@ class SwitchCommand(Command):
         return (project_dir / current_worktree).resolve(), current_worktree
 
     def _resolve_default_branch(
-        self, config: RepositoryConfig, worktrees: list[dict], project_dir: Path
+        self, config: RepositoryConfig, listed: list[ListedWorktree], project_dir: Path
     ) -> tuple[Path, str | None]:
         """Resolve the worktree on the default branch, or the project root when there is none."""
         default_ref = f"{LOCAL_BRANCH_REF_PREFIX}{config.default_branch}"
-        for worktree in worktrees:
-            if worktree.get("is_bare") or worktree.get("branch") != default_ref:
-                continue
-            if (path := Path(worktree["path"])).is_dir():
-                return path.resolve(), self._relative_name(path, project_dir)
+        for worktree in listed:
+            if worktree.branch == default_ref:
+                return worktree.path, worktree.name
         return project_dir, None
 
-    def _resolve_named(
-        self, target: str, worktrees: list[dict], project_dir: Path
-    ) -> tuple[Path, str | None]:
+    def _resolve_named(self, target: str, listed: list[ListedWorktree]) -> tuple[Path, str | None]:
         """Resolve a worktree name, then a checked-out branch name, to an existing worktree."""
-        for worktree in worktrees:
-            if worktree.get("is_bare") or not (path := Path(worktree["path"])).is_dir():
-                continue
-            if (name := self._relative_name(path, project_dir)) == target:
-                return path.resolve(), name
-        for worktree in worktrees:
-            branch = worktree.get("branch")
-            if worktree.get("is_bare") or branch != f"{LOCAL_BRANCH_REF_PREFIX}{target}":
-                continue
-            if (path := Path(worktree["path"])).is_dir():
-                return path.resolve(), self._relative_name(path, project_dir)
+        for worktree in listed:
+            if worktree.name == target:
+                return worktree.path, worktree.name
+        branch_ref = f"{LOCAL_BRANCH_REF_PREFIX}{target}"
+        for worktree in listed:
+            if worktree.branch == branch_ref:
+                return worktree.path, worktree.name
         raise WorktreeNotFoundError(f"No worktree or branch named {target}")
 
-    def _is_active_worktree(self, name: str, worktrees: list[dict], project_dir: Path) -> bool:
-        """Whether `name` refers to a worktree that currently exists on disk.
+    def _listed_worktrees(self, worktrees: list[dict], project_dir: Path) -> list[ListedWorktree]:
+        """Normalize `git worktree list` records into the worktrees that exist on disk.
 
-        Guards against recording a directory that merely contains a nested git repository,
-        such as a submodule, as the previous worktree.
+        Skips the bare repository and worktrees whose directory is gone, so later lookups
+        cannot resolve to a path that is no longer there.
         """
+        listed = []
         for worktree in worktrees:
             if worktree.get("is_bare"):
                 continue
             path = Path(worktree["path"])
-            if path.is_dir() and self._relative_name(path, project_dir) == name:
-                return True
-        return False
+            if not path.is_dir():
+                continue
+            listed.append(
+                ListedWorktree(
+                    name=self._relative_name(path, project_dir),
+                    path=path.resolve(),
+                    branch=worktree.get("branch"),
+                )
+            )
+        return listed
+
+    @staticmethod
+    def _find_worktree(listed: list[ListedWorktree], name: str | None) -> ListedWorktree | None:
+        """The listed worktree with the given project-relative name, if any."""
+        return next((worktree for worktree in listed if worktree.name == name), None)
 
     @staticmethod
     def _relative_name(path: Path, project_dir: Path) -> str | None:
