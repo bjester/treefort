@@ -216,6 +216,13 @@ class CheckoutCommandTestCase(TestCase):
             "Ignoring git fetch error, attempting to open worktree"
         )
 
+    def test_call__logs_fetch_failure_at_debug(self):
+        self.git.fetch.side_effect = CommandError("fetch failed")
+
+        self.command("feature")
+
+        self.runtime.logger.debug.assert_called_once_with("Ignoring fetch failure: fetch failed")
+
     def test_call__warns_outside_spinner_when_fetch_fails(self):
         events = []
         self.git.fetch.side_effect = CommandError("fetch failed")

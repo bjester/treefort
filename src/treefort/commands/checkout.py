@@ -130,8 +130,9 @@ class CheckoutCommand(Command):
                     self._runtime.git.fetch(
                         inpt.remote, f"{inpt.worktree_name}:{inpt.worktree_name}"
                     )
-                except (CommandError, OSError):
+                except (CommandError, OSError) as e:
                     fetch_error = True
+                    self._logger.debug(f"Ignoring fetch failure: {e}")
 
         if fetch_error:
             self._logger.warning("Ignoring git fetch error, attempting to open worktree")
