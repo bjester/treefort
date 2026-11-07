@@ -5,7 +5,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 from treefort.commands.switch import SwitchCommand
 from treefort.config import RepositoryConfig, TomlConfigIO
@@ -93,6 +93,16 @@ class SwitchCommandTestCase(TestCase):
             cd_file.read_text(encoding="utf-8"), f"{self.project_dir / 'subpath' / 'feature'}\n"
         )
 
+    def test_call__resolves_worktree_through_symlinked_project_dir(self):
+        link = self.tmp_path / "link"
+        link.symlink_to(self.project_dir)
+        self.git.list_worktrees.return_value = self.worktree_listing()
+
+        with patch.object(Context, "project_dir", new_callable=PropertyMock, return_value=link):
+            cd_file = self.switch("feature-a")
+
+        self.assertEqual(cd_file.read_text(encoding="utf-8"), f"{self.project_dir / 'feature-a'}\n")
+
     def test_call__resolves_checked_out_branch_name(self):
         self.git.list_worktrees.return_value = self.worktree_listing()
 
@@ -117,12 +127,44 @@ class SwitchCommandTestCase(TestCase):
             self.switch("-")
 
     def test_call__raises_when_previous_worktree_missing_on_disk(self):
+        self.git.list_worktrees.return_value = self.worktree_listing()
         config = self.load_config()
         config.update(last_worktree="gone")
         self.context.set_config(config)
 
         with self.assertRaisesRegex(WorktreeNotFoundError, "No previous worktree recorded"):
             self.switch("-")
+
+    def test_call__raises_when_previous_worktree_escapes_project_dir(self):
+        for escaping_name in ("..", "../elsewhere", "/tmp"):
+            config = self.load_config()
+            config.update(last_worktree=escaping_name)
+            self.context.set_config(config)
+
+            with self.assertRaisesRegex(WorktreeNotFoundError, "No previous worktree recorded"):
+                self.switch("-")
+
+    def test_call__raises_when_previous_worktree_is_not_a_worktree(self):
+        (self.project_dir / "nested-repo").mkdir()
+        (self.project_dir / "nested-repo" / ".git").write_text("gitdir: ./\n", encoding="utf-8")
+        self.git.list_worktrees.return_value = self.worktree_listing()
+        for non_worktree in (".bare", ".treefort", "subpath", "nested-repo"):
+            config = self.load_config()
+            config.update(last_worktree=non_worktree)
+            self.context.set_config(config)
+
+            with self.assertRaisesRegex(WorktreeNotFoundError, "No previous worktree recorded"):
+                self.switch("-")
+
+    def test_call__canonicalizes_previous_worktree_name(self):
+        self.git.list_worktrees.return_value = self.worktree_listing()
+        config = self.load_config()
+        config.update(last_worktree="./feature-a")
+        self.context.set_config(config)
+
+        cd_file = self.switch("-")
+
+        self.assertEqual(cd_file.read_text(encoding="utf-8"), f"{self.project_dir / 'feature-a'}\n")
 
     def test_call__resolves_default_branch_shortcut(self):
         (self.project_dir / "main-checkout").mkdir()
@@ -154,11 +196,13 @@ class SwitchCommandTestCase(TestCase):
         cd_file = self.switch("@")
 
         self.assertEqual(cd_file.read_text(encoding="utf-8"), f"{self.project_dir / 'feature-a'}\n")
+        self.git.list_worktrees.assert_not_called()
 
     def test_call__current_worktree_shortcut_resolves_to_project_dir_at_root(self):
         cd_file = self.switch("@")
 
         self.assertEqual(cd_file.read_text(encoding="utf-8"), f"{self.project_dir}\n")
+        self.git.list_worktrees.assert_not_called()
 
     def test_call__dot_alias_resolves_current_worktree(self):
         self.enter_worktree("subpath/feature")

@@ -21,6 +21,10 @@ SHELLS = ("bash", "zsh", "fish")
 CMD_NAME_PATTERN = r"[a-zA-Z0-9][a-zA-Z0-9_-]*"
 # Mirrors the `-v`/`--verbose` flags that treefort.cli strips before dispatch. New root-wide
 # flags must be added here as well, or they disappear from tab completion.
+#
+# Completion invariant, encoded in both shell snippets: the subcommand is the FIRST non-flag
+# token at index >= 1, and --remote is the only flag that consumes the following token. A
+# new root-level flag that takes a value invalidates the subcommand detection everywhere.
 DEFAULT_OPTIONS = {"--verbose", "-v"}
 
 # The command name is templated into the shell snippets as __CMD__ so the snippets can
@@ -58,8 +62,6 @@ end
 
 # Shell-native completion for positional arguments and option values. All git calls silence
 # stderr so pressing <Tab> outside a repository stays quiet, and no Python runs on <Tab>.
-# Note: a global flag before the subcommand, such as `treefort --verbose switch <Tab>`,
-# defeats the `${COMP_WORDS[1]}` subcommand lookup and falls back to fire's static flags.
 BASH_DYNAMIC_HELPERS = """\
 _treefort_list_branch_refs()
 {
@@ -68,8 +70,11 @@ _treefort_list_branch_refs()
 
 _treefort_list_worktrees()
 {
-    local dir="$PWD" project="" path="" name is_bare=""
-    while [[ "$dir" != "/" ]]; do
+    local dir project="" path="" name is_bare=""
+    # `pwd -P` fails when the working directory has been deleted, such as after removing the
+    # active worktree; bail out instead of walking an empty path forever.
+    dir="$(pwd -P 2>/dev/null)" || return 0
+    while [[ -n "$dir" && "$dir" != "/" ]]; do
         if [[ -e "$dir/.bare" ]]; then
             project="$dir"
             break
@@ -121,12 +126,19 @@ _treefort_dynamic_completion()
             return 0
             ;;
     esac
-    local subcommand positional index
-    subcommand="${COMP_WORDS[1]}"
+    local subcommand="" positional index
     positional=0
-    for ((index=2; index < COMP_CWORD; ++index)); do
+    for ((index=1; index < COMP_CWORD; ++index)); do
+        if [[ "${COMP_WORDS[index]}" == -* ]]; then
+            continue
+        fi
         # --remote takes a value, so the word following it is not a positional argument
-        if [[ "${COMP_WORDS[index]}" != -* && "${COMP_WORDS[index-1]}" != "--remote" ]]; then
+        if [[ "${COMP_WORDS[index-1]}" == "--remote" ]]; then
+            continue
+        fi
+        if [[ -z "$subcommand" ]]; then
+            subcommand="${COMP_WORDS[index]}"
+        else
             positional=$((positional + 1))
         fi
     done
@@ -175,20 +187,65 @@ _treefort_dynamic_completion()
 }
 """
 
+# Fire's completion helpers assume the last non-flag token is a (sub)command and that global
+# flags may take a value. For this CLI the subcommand is the first non-flag token and
+# -v/--verbose are boolean, so these overrides are appended after fire's definitions (bash
+# keeps the last definition) to complete --flags after positional arguments and globals.
+BASH_HELPER_OVERRIDES = """\
+_treefort_get_lastcommand()
+{
+    local i
+    for ((i=1; i < COMP_CWORD; ++i)); do
+        if [[ "${COMP_WORDS[i]}" == -* ]]; then
+            continue
+        fi
+        # --remote takes a value, which is not the subcommand
+        if [[ "${COMP_WORDS[i-1]}" == "--remote" ]]; then
+            continue
+        fi
+        echo "${COMP_WORDS[i]}"
+        return 0
+    done
+    echo "${COMP_WORDS[0]}"
+}
+
+_treefort_is_prev_global()
+{
+    return 1
+}
+"""
+
 FISH_HELPERS = """\
-function __treefort_subcommand_is
+function __treefort_using_command
     set -l tokens (commandline -opc)
-    test "$tokens[2]" = "$argv[1]"
+    set -l subcommand ""
+    set -l previous ""
+    for token in $tokens[2..-1]
+        if not string match -q -- '-*' $token; and test "$previous" != "--remote"
+            set subcommand $token
+            break
+        end
+        set previous $token
+    end
+    if test "$argv[1]" = "$tokens[1]"
+        test -z "$subcommand"
+    else
+        test "$subcommand" = "$argv[1]"
+    end
 end
 
 function __treefort_positional_count
     set -l tokens (commandline -opc)
     set -l count 0
+    set -l subcommand_seen 0
     set -l previous ""
-    for token in $tokens[3..-1]
-        # --remote takes a value, so the word following it is not a positional argument
+    for token in $tokens[2..-1]
         if not string match -q -- '-*' $token; and test "$previous" != "--remote"
-            set count (math "$count + 1")
+            if test $subcommand_seen -eq 0
+                set subcommand_seen 1
+            else
+                set count (math "$count + 1")
+            end
         end
         set previous $token
     end
@@ -204,7 +261,12 @@ function __treefort_remotes
 end
 
 function __treefort_worktree_names
-    set -l dir (pwd)
+    # `pwd -P` fails when the working directory has been deleted; bail out instead of
+    # looping forever on an empty path.
+    set -l dir (pwd -P 2>/dev/null)
+    if test -z "$dir"
+        return 0
+    end
     set -l project ""
     while test "$dir" != "/"
         if test -e "$dir/.bare"
@@ -231,30 +293,30 @@ function __treefort_worktree_names
 end
 """
 
-# The rules key on the subcommand itself (`__treefort_subcommand_is`), not on the last
-# non-flag token like fire's using_command helper, so second positionals still complete.
-# Shortcut words stay off the first position of each -a value so fish's option parser can
-# never mistake the value for another flag.
+# The rules key on the subcommand via `__treefort_using_command`, overridden below to mean
+# the first non-flag token, so second positionals still complete; fire's own helper only
+# matches the last non-flag token. Shortcut words stay off the first position of each -a
+# value so fish's option parser can never mistake the value for another flag.
 FISH_DYNAMIC_RULES = """\
-complete -c __CMD__ -n '__treefort_subcommand_is checkout' -f -a '(__treefort_branch_refs)'
-complete -c __CMD__ -n '__treefort_subcommand_is checkout' -l remote -f -a '(__treefort_remotes)'
-complete -c __CMD__ \\
-    -n '__treefort_subcommand_is create; and test (__treefort_positional_count) -ge 1' \\
+complete -c __CMD__ -n '__treefort_using_command checkout' -f -a '(__treefort_branch_refs)'
+complete -c __CMD__ -n '__treefort_using_command checkout' -l remote -f -a '(__treefort_remotes)'
+complete -c __CMD__ \
+    -n '__treefort_using_command create; and test (__treefort_positional_count) -ge 1' \
     -f -a '@ ^ (__treefort_branch_refs)'
-complete -c __CMD__ \\
-    -n '__treefort_subcommand_is switch; or __treefort_subcommand_is sw' \\
+complete -c __CMD__ \
+    -n '__treefort_using_command switch; or __treefort_using_command sw' \
     -f -a '@ ^ - (__treefort_worktree_names)'
-complete -c __CMD__ \\
-    -n '__treefort_subcommand_is remove; or __treefort_subcommand_is rm' \\
+complete -c __CMD__ \
+    -n '__treefort_using_command remove; or __treefort_using_command rm' \
     -f -a '@ (__treefort_worktree_names)'
-complete -c __CMD__ \\
-    -n '__treefort_subcommand_is stack; or __treefort_subcommand_is restack' \\
+complete -c __CMD__ \
+    -n '__treefort_using_command stack; or __treefort_using_command restack' \
     -f -a 'status rebase sync (__treefort_worktree_names)'
-complete -c __CMD__ \\
-    -n '__treefort_subcommand_is hook; and test (__treefort_positional_count) -eq 0' \\
+complete -c __CMD__ \
+    -n '__treefort_using_command hook; and test (__treefort_positional_count) -eq 0' \
     -f -a '__HOOK_NAMES__'
-complete -c __CMD__ \\
-    -n '__treefort_subcommand_is hook; and test (__treefort_positional_count) -eq 1' \\
+complete -c __CMD__ \
+    -n '__treefort_using_command hook; and test (__treefort_positional_count) -eq 1' \
     -f -a '(__treefort_worktree_names)'
 """
 
@@ -328,22 +390,48 @@ class ShellInitCommand(Command):
         for helper in FIRE_BASH_HELPERS:
             script = script.replace(helper, f"_treefort_{helper}")
 
+        # The helper is called from inside the completion function, far above the override
+        # appended at the end of the script; point readers at the redefinition.
+        call_site = "  lastcommand=$(_treefort_get_lastcommand)"
+        script = script.replace(
+            call_site,
+            "  # Redefined at the end of this script; see BASH_HELPER_OVERRIDES.\n" + call_site,
+            1,
+        )
+
         dynamic_helpers = BASH_DYNAMIC_HELPERS.replace("__HOOK_NAMES__", self._hook_names())
         script = script.replace(FIRE_BASH_HEADER, f"{FIRE_BASH_HEADER}\n{dynamic_helpers}", 1)
 
         dynamic_dispatch = "  if _treefort_dynamic_completion; then\n    return 0\n  fi\n"
         patched = f"{dynamic_dispatch}{FIRE_BASH_COMPLETION_LINE}"
-        return script.replace(FIRE_BASH_COMPLETION_LINE, patched, 1)
+        script = script.replace(FIRE_BASH_COMPLETION_LINE, patched, 1)
+        return f"{script}\n{BASH_HELPER_OVERRIDES}"
 
     def _fish_script(self, cmd: str) -> str:
         """Fire's fish completion, with namespaced helpers and dynamic completions appended."""
         script = fire_completion._FishScript(cmd, self._completion_commands(), set(DEFAULT_OPTIONS))
         for old, new in (
+            # Fire gates every subcommand flag rule on a helper that compares "--" + option
+            # against the previous token, which never matches, so drop the guard entirely;
+            # the CLI's global flags are boolean and need no value handling.
+            ("; and __is_prev_global;", ";"),
             ("__fish_using_command", "__treefort_using_command"),
             ("__option_entered_check", "__treefort_option_entered_check"),
             ("__is_prev_global", "__treefort_is_prev_global"),
+            # Fire renders the short -v option as the long --v flag; register it as short.
+            (" --v' -l v\n", " -v' -s v\n"),
         ):
             script = script.replace(old, new)
+
+        # Fire's global-flag helper is unreferenced once the guard is stripped above; drop
+        # the dead definition instead of shipping its never-matching comparison.
+        script = re.sub(
+            r"function __treefort_is_prev_global\n.*?\nend\n\n",
+            "",
+            script,
+            count=1,
+            flags=re.DOTALL,
+        )
 
         rules = FISH_DYNAMIC_RULES.replace("__CMD__", cmd).replace(
             "__HOOK_NAMES__", self._hook_names()

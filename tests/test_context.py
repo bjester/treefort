@@ -140,6 +140,13 @@ class ContextTestCase(TestCase):
         self.assertEqual(self.context.cwd, old_cwd)
         self.assertEqual(Path.cwd(), old_cwd)
 
+    def test_use__stores_resolved_cwd_for_relative_paths(self):
+        project_dir = self.make_project()
+        os.chdir(self.tmp_path)
+
+        with self.context.use("project"):
+            self.assertEqual(self.context.cwd, project_dir.resolve())
+
     def test_use__falls_back_to_project_dir_when_old_cwd_deleted(self):
         project_dir = self.make_project()
         old_cwd = project_dir / "feature-a"

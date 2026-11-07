@@ -94,7 +94,7 @@ class Context:
     @contextmanager
     def use(self, cwd: str | Path):
         old_cwd = self.cwd
-        cwd_path = Path(cwd)
+        cwd_path = Path(cwd).resolve()
         os.chdir(cwd_path)
         self.cwd = cwd_path
         try:

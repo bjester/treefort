@@ -80,7 +80,7 @@ class LocalRepoIntegrationTestCase(TestCase):
         self.temp_dir = tempfile.TemporaryDirectory(prefix="treefort-integration-")
         self.addCleanup(self.temp_dir.cleanup)
         self.addCleanup(self._restore_cwd)
-        self.temp_path = Path(self.temp_dir.name)
+        self.temp_path = Path(self.temp_dir.name).resolve()
         self.home_dir = self.temp_path / "home"
         self.home_dir.mkdir()
         self.origin_dir = self.temp_path / "origin.git"

@@ -86,6 +86,7 @@ class ShellInitIntegrationTestCase(LocalRepoIntegrationTestCase):
             capture_output=True,
             text=True,
             check=False,
+            timeout=30,
         )
 
     def test_bash_completion__offers_worktrees_refs_and_remotes(self):
@@ -125,6 +126,25 @@ class ShellInitIntegrationTestCase(LocalRepoIntegrationTestCase):
         self.assertIn("main", completions)
         self.assertIn("origin/main", completions)
 
+    def test_bash_completion__completes_flags_after_positional_arguments(self):
+        self.runtime.git.add_worktree("feature-a", "main")
+        script = self.bash_script()
+
+        after_positional = self.completions(script, ["treefort", "checkout", "main", "--"])
+        self.assertIn("--remote", after_positional)
+        self.assertIn("--yes", after_positional)
+
+        after_global = self.completions(script, ["treefort", "checkout", "--verbose", "--"])
+        self.assertIn("--remote", after_global)
+        self.assertIn("--yes", after_global)
+
+    def test_bash_completion__completes_alias_flags_and_worktrees(self):
+        self.runtime.git.add_worktree("feature-a", "main")
+        script = self.bash_script()
+
+        self.assertIn("--force", self.completions(script, ["treefort", "rm", "--"]))
+        self.assertIn("feature-a", self.completions(script, ["treefort", "sw", ""]))
+
     def test_bash_completion__is_silent_outside_git_repos(self):
         script = self.bash_script()
 
@@ -133,3 +153,31 @@ class ShellInitIntegrationTestCase(LocalRepoIntegrationTestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
         self.assertEqual(result.stdout.split(), [])
+
+    def test_bash_completion__terminates_when_cwd_is_deleted(self):
+        script = self.bash_script()
+        gone = self.temp_path / "gone"
+        gone.mkdir()
+        driver = (
+            f"{script}\n"
+            f"cd '{gone}' && rmdir '{gone}' || exit 9\n"
+            'COMP_WORDS=(treefort switch "")\n'
+            "COMP_CWORD=2\n"
+            "_complete-treefort\n"
+            "printf '%s\\n' \"${COMPREPLY[@]}\"\n"
+        )
+
+        # treefort remove can delete the directory the user is standing in; completion must
+        # not spin on an empty `pwd -P` result or print errors
+        result = subprocess.run(
+            ["bash", "-c", driver],
+            cwd=str(self.project_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertIn("-", result.stdout.split())

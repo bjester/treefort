@@ -41,10 +41,11 @@ class SwitchCommand(Command):
         current_worktree = self._context.current_worktree_name()
         project_dir = self._context.project_dir
 
-        # The `-` and `@` shortcuts resolve without a worktree listing, but the listing is
-        # still needed to validate the current worktree before recording it as previous.
+        # `@`/`.` resolve from the current directory alone; every other target needs the
+        # worktree listing, both to resolve it and to validate the previous worktree before
+        # returning to it or recording the current one.
         worktrees: list[dict] = []
-        if current_worktree is not None or target not in ("-", "@", "."):
+        if target not in ("@", "."):
             worktrees = self._runtime.git.list_worktrees()
 
         target_path, target_name = self._resolve_target(
@@ -89,7 +90,7 @@ class SwitchCommand(Command):
         :raises WorktreeNotFoundError: When the target cannot be resolved to an existing worktree
         """
         if target == "-":
-            return self._resolve_previous(config, project_dir)
+            return self._resolve_previous(config, project_dir, worktrees)
         if target in ("@", "."):
             return self._resolve_current(project_dir, current_worktree)
         if target == "^":
@@ -97,13 +98,25 @@ class SwitchCommand(Command):
         return self._resolve_named(target, worktrees, project_dir)
 
     def _resolve_previous(
-        self, config: RepositoryConfig, project_dir: Path
+        self, config: RepositoryConfig, project_dir: Path, worktrees: list[dict]
     ) -> tuple[Path, str | None]:
-        """Resolve the previous worktree, which must still exist on disk."""
+        """Resolve the previous worktree, which must still be an existing worktree.
+
+        The recorded name is re-validated against the project's worktree listing so a
+        hand-edited or corrupted config cannot direct the shell outside the project or into
+        a directory that is not a worktree, such as `.bare`, a nested repository, or a parent
+        directory left behind by a removed nested worktree.
+        """
         last_worktree = config.last_worktree
-        if not last_worktree or not (project_dir / last_worktree).is_dir():
+        if not last_worktree:
             raise WorktreeNotFoundError("No previous worktree recorded")
-        return (project_dir / last_worktree).resolve(), last_worktree
+        candidate = project_dir / last_worktree
+        relative_name = self._relative_name(candidate, project_dir)
+        if relative_name is None or not self._is_active_worktree(
+            relative_name, worktrees, project_dir
+        ):
+            raise WorktreeNotFoundError("No previous worktree recorded")
+        return candidate.resolve(), relative_name
 
     def _resolve_current(
         self, project_dir: Path, current_worktree: str | None
@@ -160,6 +173,7 @@ class SwitchCommand(Command):
     def _relative_name(path: Path, project_dir: Path) -> str | None:
         """Return the path relative to the project directory, or `None` when outside it."""
         resolved = path.resolve()
-        if not resolved.is_relative_to(project_dir) or resolved == project_dir:
+        resolved_project = project_dir.resolve()
+        if not resolved.is_relative_to(resolved_project) or resolved == resolved_project:
             return None
-        return resolved.relative_to(project_dir).as_posix()
+        return resolved.relative_to(resolved_project).as_posix()

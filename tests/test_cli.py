@@ -75,6 +75,19 @@ class MainTestCase(TestCase):
         fire_mock.assert_called_once_with(component=component)
 
     @patch("treefort.cli.fire.Fire")
+    @patch("treefort.cli.WorktreeCommands")
+    @patch("treefort.cli.sys.argv", ["treefort", "sw", "-"])
+    def test_main__rewrites_bare_dash_after_alias_replacement(self, commands_cls_mock, fire_mock):
+        component = MagicMock()
+        component._alias_map = {"sw": "switch"}
+        commands_cls_mock.return_value = component
+
+        main()
+
+        self.assertEqual(["treefort", "switch", "--target=-"], cli_module.sys.argv)
+        fire_mock.assert_called_once_with(component=component)
+
+    @patch("treefort.cli.fire.Fire")
     @patch("treefort.cli.replace_switch_dash")
     @patch("treefort.cli.replace_alias")
     @patch("treefort.cli.replace_verbose")
