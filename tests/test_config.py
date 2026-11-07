@@ -96,6 +96,22 @@ class RepositoryConfigTestCase(TestCase):
         self.assertEqual(loaded.get("owner"), "octo")
         self.assertEqual(loaded.get("name"), "repo")
 
+    def test_verbose__defaults_to_false_and_reads_boolean(self):
+        io = TomlConfigIO(self.tmp_path / "config.toml")
+        config = RepositoryConfig(io)
+        self.assertFalse(config.verbose)
+
+        config.update(verbose=True)
+        config.save()
+
+        loaded = RepositoryConfig(io)
+        loaded.load()
+        self.assertTrue(loaded.verbose)
+
+        loaded.update(verbose="no")
+        with self.assertRaisesRegex(ConfigTypeError, "verbose must be a boolean, got str"):
+            _ = loaded.verbose
+
 
 class GlobalConfigTestCase(TestCase):
     def setUp(self):
@@ -121,6 +137,23 @@ class GlobalConfigTestCase(TestCase):
         self.assertEqual(loaded_global.allowed_envvars, ["TOKEN"])
         self.assertEqual(loaded_global.allowed_hooks.get("/tmp/hook.sh"), "abc123")
 
+    def test_verbose__defaults_to_false_and_reads_boolean(self):
+        global_io = TomlConfigIO(self.tmp_path / "config.toml")
+        allowed_hooks_io = JsonConfigIO(self.tmp_path / "allowed_hooks.json")
+        config = GlobalConfig(global_io, AllowedHooksConfig(allowed_hooks_io))
+        self.assertFalse(config.verbose)
+
+        config.update(verbose=True)
+        config.save()
+
+        loaded = GlobalConfig(global_io, AllowedHooksConfig(allowed_hooks_io))
+        loaded.load()
+        self.assertTrue(loaded.verbose)
+
+        loaded.update(verbose=[1])
+        with self.assertRaisesRegex(ConfigTypeError, "verbose must be a boolean, got list"):
+            _ = loaded.verbose
+
 
 class ConfigManagerTestCase(TestCase):
     def setUp(self):
@@ -136,6 +169,24 @@ class ConfigManagerTestCase(TestCase):
         config = ConfigManager().get_config(self.config_dir)
         self.assertEqual(config.default_branch, "main")
         self.assertIsNone(config.owner)
+
+    def test_get_config__failed_load_does_not_cache_partial_config(self):
+        (self.config_dir / "config.toml").write_text('type = "global"\n', encoding="utf-8")
+        manager = ConfigManager()
+
+        with self.assertRaises(ConfigTypeError):
+            manager.get_config(self.config_dir)
+        with self.assertRaises(ConfigTypeError):
+            manager.get_config(self.config_dir)
+
+    def test_get_global_config__failed_load_does_not_cache_partial_config(self):
+        (self.config_dir / "config.toml").write_text('type = "repository"\n', encoding="utf-8")
+        manager = ConfigManager()
+
+        with self.assertRaises(ConfigTypeError):
+            manager.get_global_config(self.config_dir)
+        with self.assertRaises(ConfigTypeError):
+            manager.get_global_config(self.config_dir)
 
     def test_get_global_config__missing_config_does_not_raise(self):
         config = ConfigManager().get_global_config(self.config_dir)

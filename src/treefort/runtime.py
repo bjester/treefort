@@ -1,5 +1,11 @@
+import os
+
 from treefort.context import Context
-from treefort.errors import RemoteUsageError
+from treefort.errors import (
+    AncestorNotFoundError,
+    ProjectNotFoundError,
+    RemoteUsageError,
+)
 from treefort.gh import GithubCLI
 from treefort.git import GitCLI, GitRemote
 from treefort.hooks import Hooks
@@ -15,25 +21,45 @@ class Runtime:
         :param verbose: Whether to enable logging verbosity
         """
         self.name = name
-        self.verbose = verbose
         self.context = Context()
 
         # run migrations before resolving any configuration directories
         self.context.migrate()
 
+        env_verbose = os.environ.get("TREEFORT_VERBOSE", "").lower() in ("1", "true", "yes")
+        self.verbose = bool(verbose or env_verbose)
+
         log_dir = self.context.global_config_dir / "logs"
-        logger = setup_logger(
-            name,
-            log_dir=log_dir,
-            verbose=verbose,
-        )
-        self.logger = logger
+        try:
+            if self._resolve_config_verbose():
+                self.verbose = True
+        finally:
+            self.logger = setup_logger(
+                name,
+                log_dir=log_dir,
+                verbose=self.verbose,
+            )
 
         # operators
         self.hooks = Hooks(self.context, self.logger)
         self.git = GitCLI(self.context, self.logger)
         self.gh = GithubCLI(self.context, self.logger)
         self.templates = Templates(self.context, self.logger)
+
+    def _resolve_config_verbose(self) -> bool:
+        """Return True if either repository or global configuration enables verbose mode.
+
+        Verbosity is additive across sources: any configuration level set to ``true``
+        enables verbose logging.
+        """
+        repo_verbose = False
+        try:
+            repo_verbose = self.context.get_config().verbose
+        except (ProjectNotFoundError, AncestorNotFoundError):
+            pass
+
+        global_verbose = self.context.get_global_config().verbose
+        return repo_verbose or global_verbose
 
     def get_default_remote(self) -> GitRemote | None:
         return self.get_remote(owner_name=self.context.get_config().owner)

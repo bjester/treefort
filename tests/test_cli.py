@@ -58,6 +58,73 @@ class MainTestCase(TestCase):
         replace_alias_mock.assert_called_once_with(component)
         fire_mock.assert_called_once_with(component=component)
 
+    @patch("treefort.cli.fire.Fire")
+    @patch("treefort.cli.replace_alias")
+    @patch("treefort.cli.replace_verbose")
+    @patch("treefort.cli.WorktreeCommands")
+    def test_main__reraises_exception_when_runtime_verbose_is_true(
+        self,
+        commands_cls_mock,
+        replace_verbose_mock,
+        replace_alias_mock,
+        fire_mock,
+    ):
+        component = Mock()
+        component._runtime.verbose = True
+        commands_cls_mock.return_value = component
+        replace_verbose_mock.return_value = False
+        fire_mock.side_effect = RuntimeError("boom")
+
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            main()
+
+        component._logger.error.assert_not_called()
+
+    @patch("treefort.cli.sys.exit")
+    @patch("treefort.cli.fire.Fire")
+    @patch("treefort.cli.replace_alias")
+    @patch("treefort.cli.replace_verbose")
+    @patch("treefort.cli.WorktreeCommands")
+    def test_main__logs_error_and_exits_when_not_verbose(
+        self,
+        commands_cls_mock,
+        replace_verbose_mock,
+        replace_alias_mock,
+        fire_mock,
+        exit_mock,
+    ):
+        component = Mock()
+        component._runtime.verbose = False
+        commands_cls_mock.return_value = component
+        replace_verbose_mock.return_value = False
+        fire_mock.side_effect = RuntimeError("boom")
+
+        main()
+
+        component._logger.error.assert_called_once_with("Command failed: boom")
+        exit_mock.assert_called_once_with(1)
+
+    @patch("treefort.cli.logging.getLogger")
+    @patch("treefort.cli.sys.exit")
+    @patch("treefort.cli.replace_verbose")
+    @patch("treefort.cli.WorktreeCommands")
+    def test_main__logs_error_and_exits_when_component_init_fails(
+        self,
+        commands_cls_mock,
+        replace_verbose_mock,
+        exit_mock,
+        get_logger_mock,
+    ):
+        commands_cls_mock._name = "treefort"
+        commands_cls_mock.side_effect = RuntimeError("invalid config")
+        replace_verbose_mock.return_value = False
+
+        main()
+
+        get_logger_mock.assert_called_once_with("treefort")
+        get_logger_mock.return_value.error.assert_called_once_with("Command failed: invalid config")
+        exit_mock.assert_called_once_with(1)
+
 
 class ReplaceVerboseTestCase(TestCase):
     @patch("treefort.cli.sys.argv", ["treefort", "-v", "remove", "feature"])

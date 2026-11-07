@@ -227,7 +227,19 @@ class AllowedHooksConfig(Config):
         return super().get("hooks", default={}).get(key, default)
 
 
-class GlobalConfig(Config):
+class SettingsConfig(Config):
+    """Base configuration for user and repository settings."""
+
+    @property
+    def verbose(self) -> bool:
+        """Whether verbose logging is enabled."""
+        raw = self._data.get("verbose", False)
+        if not isinstance(raw, bool):
+            raise ConfigTypeError(f"verbose must be a boolean, got {type(raw).__name__}")
+        return raw
+
+
+class GlobalConfig(SettingsConfig):
     """Global configuration."""
 
     type: str = "global"
@@ -251,7 +263,7 @@ class GlobalConfig(Config):
         super().save()
 
 
-class RepositoryConfig(Config):
+class RepositoryConfig(SettingsConfig):
     """Respository/project configuration."""
 
     type: str = "repository"
@@ -321,8 +333,9 @@ class ConfigManager:
     def get_config(self, config_dir: Path) -> RepositoryConfig:
         """Get the repository configuration."""
         if self._config is None:
-            self._config = RepositoryConfig(self._get_config_io(config_dir, "config"))
-            self._config.load()
+            config = RepositoryConfig(self._get_config_io(config_dir, "config"))
+            config.load()
+            self._config = config
         return self._config
 
     def get_global_config(self, config_dir: Path) -> GlobalConfig:
@@ -333,17 +346,17 @@ class ConfigManager:
             )
             allowed_hooks = AllowedHooksConfig(allowed_hooks_io)
 
-            self._global_config = GlobalConfig(
-                self._get_config_io(config_dir, "config"), allowed_hooks
-            )
-            self._global_config.load()
+            global_config = GlobalConfig(self._get_config_io(config_dir, "config"), allowed_hooks)
+            global_config.load()
 
             if not allowed_hooks_io.exists():
-                allowed_hooks.update(self._global_config._data.pop("allowed_hooks", {}))
+                allowed_hooks.update(global_config._data.pop("allowed_hooks", {}))
                 allowed_hooks.save()
-                self._global_config.save()
+                global_config.save()
             else:
                 allowed_hooks.load()
+
+            self._global_config = global_config
 
         return self._global_config
 

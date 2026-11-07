@@ -80,7 +80,9 @@ class Hooks(ConfigOperator, SubprocessOperator):
             fired = True
             return_status = self.stream_exec([hook_file_str, *[str(arg) for arg in args]])
             if return_status != 0:
-                raise HookError(f"Hook {hook.name} failed with exit code {return_status}")
+                tail = self._format_output_tail()
+                detail = f":{tail}" if tail else ""
+                raise HookError(f"Hook {hook.name} failed with exit code {return_status}{detail}")
         return fired
 
     def _check_allowed(self, hook_file: Path, bypass_allowlist: bool = False) -> bool:

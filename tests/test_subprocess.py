@@ -57,9 +57,10 @@ class SubprocessOperatorTestCase(TestCase):
 
         self.assertEqual(exit_code, 0)
         self.logger.getChild.assert_called_once_with("test_subprocess")
-        self.child_logger.info.assert_any_call(
+        self.child_logger.debug.assert_any_call(
             f"Executing: {shlex.join(expected_command)}", extra=mock.ANY
         )
+        self.assertEqual(list(self.operator.last_output), ["line1", "line2"])
         self.assertEqual(self.child_command_logger.debug.call_count, 4)
         self.assertEqual(
             self.child_command_logger.debug.call_args_list[0][0][0],
@@ -71,6 +72,22 @@ class SubprocessOperatorTestCase(TestCase):
             self.child_command_logger.debug.call_args_list[3][0][0],
             "END: test_command do-something (0)",
         )
+
+    @mock.patch("treefort.subprocess.subprocess.Popen")
+    def test_stream_exec__retains_bounded_last_output(self, mock_popen):
+        process_mock = MagicMock()
+        process_mock.stdout = [f"line-{i}\n" for i in range(25)] + ["\n"]
+        process_mock.returncode = 1
+        process_mock.pid = 123
+        process_mock.poll.return_value = 1
+        mock_popen.return_value = process_mock
+
+        exit_code = self.operator.stream_exec(["do-something"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(len(self.operator.last_output), 20)
+        self.assertEqual(self.operator.last_output[0], "line-5")
+        self.assertEqual(self.operator.last_output[-1], "line-24")
 
     @mock.patch("treefort.subprocess.subprocess.Popen")
     def test_stream_exec__timeout_kills_process(self, mock_popen):
@@ -116,6 +133,37 @@ class SubprocessOperatorTestCase(TestCase):
         )
 
     @mock.patch("treefort.subprocess.subprocess.run")
+    def test_run__records_stdout_then_stderr_into_last_output_on_failure(self, mock_run):
+        stdout_lines = "".join(f"stdout-{i}\n" for i in range(25))
+        mock_run.side_effect = subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["test_command", "get-data"],
+            output=stdout_lines,
+            stderr="fatal: bad revision\n\n",
+        )
+
+        with self.assertRaises(subprocess.CalledProcessError):
+            with self.operator.run(["get-data"]):
+                pass
+
+        self.assertEqual(len(self.operator.last_output), 20)
+        self.assertEqual(self.operator.last_output[0], "stdout-6")
+        self.assertEqual(self.operator.last_output[-2], "stdout-24")
+        self.assertEqual(self.operator.last_output[-1], "fatal: bad revision")
+        self.assertEqual(
+            self.child_command_logger.debug.call_args_list[0][0][0],
+            "START: test_command get-data",
+        )
+        self.assertEqual(
+            self.child_command_logger.debug.call_args_list[-2][0][0],
+            "fatal: bad revision",
+        )
+        self.assertEqual(
+            self.child_command_logger.debug.call_args_list[-1][0][0],
+            "END: test_command get-data (128)",
+        )
+
+    @mock.patch("treefort.subprocess.subprocess.run")
     def test_iter_output(self, mock_run):
         result_mock = Mock(spec=subprocess.CompletedProcess, stdout="line1\nline2", returncode=0)
         mock_run.return_value = result_mock
@@ -134,7 +182,8 @@ class SubprocessOperatorTestCase(TestCase):
         )
 
         self.assertEqual(output, ["line1", "line2"])
-        self.child_logger.info.assert_called_once()
+        self.child_logger.debug.assert_called_once()
+        self.child_logger.info.assert_not_called()
         self.assertEqual(self.child_command_logger.debug.call_count, 4)
         self.assertEqual(
             self.child_command_logger.debug.call_args_list[0][0][0], "START: test_command get-data"

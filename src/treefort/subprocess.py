@@ -5,7 +5,8 @@ import shlex
 import subprocess
 import threading
 import time
-from collections.abc import Generator, Iterator
+from collections import deque
+from collections.abc import Generator, Iterator, Sequence
 from contextlib import ContextDecorator, contextmanager
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -15,6 +16,7 @@ from treefort.operator import RuntimeOperator
 
 # These are the allowed colors for command output, to avoid conflict with red/yellow errors/warnings
 ALLOWED_COLORS = ["green", "blue", "magenta", "cyan"]
+MAX_OUTPUT_TAIL = 20
 
 
 def _log_name(command: list[str]) -> str:
@@ -88,6 +90,17 @@ class SubprocessOperator(RuntimeOperator):
     """The number of seconds to wait for a process to finish"""
     command_name: str | None = None
     """The name of the command being executed, prepended to the command list"""
+    last_output: Sequence[str] = ()
+    """Bounded tail buffer of recent non-empty output lines from the last command"""
+
+    def _record_output_line(self, line: str) -> str:
+        stripped = line.rstrip()
+        if stripped:
+            self.last_output.append(stripped)
+        return stripped
+
+    def _format_output_tail(self) -> str:
+        return f"\n{chr(10).join(self.last_output)}" if self.last_output else ""
 
     def _get_command_logger(self, command: list[str]) -> logging.Logger:
         """Get a dedicated logger for logging command output"""
@@ -103,6 +116,7 @@ class SubprocessOperator(RuntimeOperator):
         :return: The exit code of the process
         """
         logger = self._get_command_logger(command)
+        self.last_output = deque(maxlen=MAX_OUTPUT_TAIL)
 
         if self.command_name:
             command = [self.command_name, *command]
@@ -120,7 +134,7 @@ class SubprocessOperator(RuntimeOperator):
 
         try:
             color = ALLOWED_COLORS[process.pid % len(ALLOWED_COLORS)]
-            self.logger.info(f"Executing: {shlex.join(command)}", extra={"color": color})
+            self.logger.debug(f"Executing: {shlex.join(command)}", extra={"color": color})
             logger.debug(f"START: {shlex.join(command)}", extra={"color": color})
 
             while True:
@@ -140,6 +154,7 @@ class SubprocessOperator(RuntimeOperator):
                         break
                     continue
 
+                self._record_output_line(line)
                 logger.debug(
                     line.rstrip(),
                     extra={"color": color},
@@ -170,15 +185,19 @@ class SubprocessOperator(RuntimeOperator):
         :param cwd: The working directory to execute the command in
         """
         logger = self._get_command_logger(command)
+        # Only failure paths populate last_output for run() so successful queries do not
+        # split stdout twice when consumed via iter_output().
+        self.last_output = deque(maxlen=MAX_OUTPUT_TAIL)
         if self.command_name:
             command = [self.command_name, *command]
 
         with random_color:
-            self.logger.info(
+            self.logger.debug(
                 f"Executing: {shlex.join(command)}", extra={"color": random_color.color}
             )
             logger.debug(f"START: {shlex.join(command)}", extra={"color": random_color.color})
             process = None
+            returncode = None
 
             try:
                 process = subprocess.run(
@@ -189,10 +208,23 @@ class SubprocessOperator(RuntimeOperator):
                     timeout=self.wait_time,
                     cwd=cwd or self.context.cwd,
                 )
+                returncode = process.returncode
                 yield process
+            except subprocess.CalledProcessError as e:
+                returncode = e.returncode
+                for stream_output in (e.stdout, e.stderr):
+                    if not stream_output:
+                        continue
+                    for line in stream_output.splitlines():
+                        if stripped := self._record_output_line(line):
+                            logger.debug(
+                                stripped,
+                                extra={"color": random_color.color},
+                            )
+                raise
             finally:
                 logger.debug(
-                    f"END: {shlex.join(command)} ({getattr(process, 'returncode', None)})",
+                    f"END: {shlex.join(command)} ({returncode})",
                     extra={"color": random_color.color},
                 )
 
