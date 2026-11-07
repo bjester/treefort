@@ -133,11 +133,12 @@ class SubprocessOperatorTestCase(TestCase):
         )
 
     @mock.patch("treefort.subprocess.subprocess.run")
-    def test_run__records_stderr_and_stdout_into_last_output_on_failure(self, mock_run):
+    def test_run__records_stdout_then_stderr_into_last_output_on_failure(self, mock_run):
+        stdout_lines = "".join(f"stdout-{i}\n" for i in range(25))
         mock_run.side_effect = subprocess.CalledProcessError(
             returncode=128,
             cmd=["test_command", "get-data"],
-            output="stdout detail\n",
+            output=stdout_lines,
             stderr="fatal: bad revision\n\n",
         )
 
@@ -145,15 +146,21 @@ class SubprocessOperatorTestCase(TestCase):
             with self.operator.run(["get-data"]):
                 pass
 
-        self.assertEqual(list(self.operator.last_output), ["fatal: bad revision", "stdout detail"])
+        self.assertEqual(len(self.operator.last_output), 20)
+        self.assertEqual(self.operator.last_output[0], "stdout-6")
+        self.assertEqual(self.operator.last_output[-2], "stdout-24")
+        self.assertEqual(self.operator.last_output[-1], "fatal: bad revision")
         self.assertEqual(
-            [call[0][0] for call in self.child_command_logger.debug.call_args_list],
-            [
-                "START: test_command get-data",
-                "fatal: bad revision",
-                "stdout detail",
-                "END: test_command get-data (128)",
-            ],
+            self.child_command_logger.debug.call_args_list[0][0][0],
+            "START: test_command get-data",
+        )
+        self.assertEqual(
+            self.child_command_logger.debug.call_args_list[-2][0][0],
+            "fatal: bad revision",
+        )
+        self.assertEqual(
+            self.child_command_logger.debug.call_args_list[-1][0][0],
+            "END: test_command get-data (128)",
         )
 
     @mock.patch("treefort.subprocess.subprocess.run")

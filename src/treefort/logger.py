@@ -81,7 +81,6 @@ def setup_logger(
     name: str,
     log_dir: Path | None = None,
     verbose: bool = False,
-    debug_log_path: Path | None = None,
     max_log_size: int = MAX_LOG_SIZE,
 ) -> logging.Logger:
     """
@@ -90,7 +89,6 @@ def setup_logger(
     :param name: Logger name
     :param log_dir: Directory for log files (defaults to ~/.treefort/logs)
     :param verbose: Enable debug logging with full subprocess output
-    :param debug_log_path: Specific path for debug log file
     :param max_log_size: Maximum size of log files in bytes
     :return: Configured logger
     """
@@ -138,21 +136,6 @@ def setup_logger(
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(file_formatter)
         handlers.append(file_handler)
-
-        # Debug log file (if verbose or debug_log_path specified)
-        if verbose or debug_log_path:
-            debug_file = debug_log_path or (log_dir / "treefort-debug.log")
-            debug_formatter = PlainFileFormatter(
-                "%(asctime)s [%(levelname)s] %(name)s | %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S",
-            )
-
-            debug_handler = RotatingFileHandler(
-                debug_file, maxBytes=max_log_size, backupCount=LOG_BACKUP, encoding="utf-8"
-            )
-            debug_handler.setLevel(logging.DEBUG)
-            debug_handler.setFormatter(debug_formatter)
-            handlers.append(debug_handler)
 
     logging.basicConfig(
         level=logging.DEBUG,

@@ -101,10 +101,9 @@ class GitCLI(SubprocessOperator):
     command_name = "git"
 
     def _format_command_error(self, return_status: int, command: list[str]) -> str:
-        detail = f"\n{chr(10).join(self.last_output)}" if self.last_output else ""
         return (
             f"Command failed, with exit status {return_status}: "
-            f"{self.command_name} {' '.join(command)}{detail}"
+            f"{self.command_name} {' '.join(command)}{self._format_output_tail()}"
         )
 
     def stream_exec(self, command: list[str], cwd: str | Path | None = None) -> int:

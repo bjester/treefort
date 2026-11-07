@@ -104,6 +104,27 @@ class MainTestCase(TestCase):
         component._logger.error.assert_called_once_with("Command failed: boom")
         exit_mock.assert_called_once_with(1)
 
+    @patch("treefort.cli.logging.getLogger")
+    @patch("treefort.cli.sys.exit")
+    @patch("treefort.cli.replace_verbose")
+    @patch("treefort.cli.WorktreeCommands")
+    def test_main__logs_error_and_exits_when_component_init_fails(
+        self,
+        commands_cls_mock,
+        replace_verbose_mock,
+        exit_mock,
+        get_logger_mock,
+    ):
+        commands_cls_mock._name = "treefort"
+        commands_cls_mock.side_effect = RuntimeError("invalid config")
+        replace_verbose_mock.return_value = False
+
+        main()
+
+        get_logger_mock.assert_called_once_with("treefort")
+        get_logger_mock.return_value.error.assert_called_once_with("Command failed: invalid config")
+        exit_mock.assert_called_once_with(1)
+
 
 class ReplaceVerboseTestCase(TestCase):
     @patch("treefort.cli.sys.argv", ["treefort", "-v", "remove", "feature"])

@@ -191,3 +191,5 @@ class SetupLoggerTestCase(TestCase):
         self.assertEqual(stderr.getvalue().splitlines(), ["▲ careful", "✗ boom"])
         self.assertNotIn("\033", stdout.getvalue())
         self.assertNotIn("\033", stderr.getvalue())
+        self.assertTrue((self.log_dir / "treefort.log").exists())
+        self.assertFalse((self.log_dir / "treefort-debug.log").exists())

@@ -1,3 +1,4 @@
+import logging
 import sys
 
 import fire
@@ -53,15 +54,19 @@ def replace_verbose():
 def main():
     """CLI tool for managing Git worktrees"""
     is_verbose = replace_verbose()
-    component = WorktreeCommands(verbose=is_verbose)
-    replace_alias(component)
+    component = None
 
     try:
+        component = WorktreeCommands(verbose=is_verbose)
+        replace_alias(component)
+
         # we do not pass `name` here, because the CLI allows using an alias for the command. if name
         # was passed, then using `worktree -- --completion` would use the wrong name for completion
         fire.Fire(component=component)
     except Exception as e:
-        if is_verbose or getattr(component._runtime, "verbose", False) is True:
+        runtime = getattr(component, "_runtime", None)
+        if is_verbose or getattr(runtime, "verbose", False) is True:
             raise
-        component._logger.error(f"Command failed: {str(e)}")
+        logger = getattr(component, "_logger", None) or logging.getLogger(WorktreeCommands._name)
+        logger.error(f"Command failed: {str(e)}")
         sys.exit(1)

@@ -1,12 +1,8 @@
-import json
 import os
-
-import tomlkit.exceptions
 
 from treefort.context import Context
 from treefort.errors import (
     AncestorNotFoundError,
-    ConfigTypeError,
     ProjectNotFoundError,
     RemoteUsageError,
 )
@@ -15,13 +11,6 @@ from treefort.git import GitCLI, GitRemote
 from treefort.hooks import Hooks
 from treefort.logger import setup_logger
 from treefort.templates import Templates
-
-CONFIG_LOAD_ERRORS = (
-    ConfigTypeError,
-    OSError,
-    tomlkit.exceptions.TOMLKitError,
-    json.JSONDecodeError,
-)
 
 
 class Runtime:
@@ -37,19 +26,18 @@ class Runtime:
         # run migrations before resolving any configuration directories
         self.context.migrate()
 
-        config_warnings: list[str] = []
         env_verbose = os.environ.get("TREEFORT_VERBOSE", "").lower() in ("1", "true", "yes")
-        self.verbose = bool(verbose or env_verbose or self._resolve_config_verbose(config_warnings))
+        self.verbose = bool(verbose or env_verbose)
 
         log_dir = self.context.global_config_dir / "logs"
-        logger = setup_logger(
-            name,
-            log_dir=log_dir,
-            verbose=self.verbose,
-        )
-        self.logger = logger
-        for warning in config_warnings:
-            self.logger.warning(warning)
+        try:
+            self.verbose = self._resolve_config_verbose() or self.verbose
+        finally:
+            self.logger = setup_logger(
+                name,
+                log_dir=log_dir,
+                verbose=self.verbose,
+            )
 
         # operators
         self.hooks = Hooks(self.context, self.logger)
@@ -57,28 +45,22 @@ class Runtime:
         self.gh = GithubCLI(self.context, self.logger)
         self.templates = Templates(self.context, self.logger)
 
-    def _resolve_config_verbose(self, warnings: list[str] | None = None) -> bool:
+    def _resolve_config_verbose(self) -> bool:
         """Return True if either repository or global configuration enables verbose mode.
 
         Verbosity is additive across sources: any configuration level set to ``true``
-        enables verbose logging, while missing or malformed configuration files fall
-        back to ``False`` and record a warning to emit once the logger is initialized.
+        enables verbose logging.
         """
         try:
             if self.context.get_config().verbose:
-                return True
+                self.verbose = True
         except (ProjectNotFoundError, AncestorNotFoundError):
             pass
-        except CONFIG_LOAD_ERRORS as e:
-            if warnings is not None:
-                warnings.append(f"Ignoring invalid repository configuration for verbose mode: {e}")
 
-        try:
-            return self.context.get_global_config().verbose
-        except CONFIG_LOAD_ERRORS as e:
-            if warnings is not None:
-                warnings.append(f"Ignoring invalid global configuration for verbose mode: {e}")
-            return False
+        if self.context.get_global_config().verbose:
+            self.verbose = True
+
+        return self.verbose
 
     def get_default_remote(self) -> GitRemote | None:
         return self.get_remote(owner_name=self.context.get_config().owner)

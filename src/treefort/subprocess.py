@@ -93,10 +93,14 @@ class SubprocessOperator(RuntimeOperator):
     last_output: Sequence[str] = ()
     """Bounded tail buffer of recent non-empty output lines from the last command"""
 
-    def _record_output_line(self, line: str):
+    def _record_output_line(self, line: str) -> str:
         stripped = line.rstrip()
         if stripped:
             self.last_output.append(stripped)
+        return stripped
+
+    def _format_output_tail(self) -> str:
+        return f"\n{chr(10).join(self.last_output)}" if self.last_output else ""
 
     def _get_command_logger(self, command: list[str]) -> logging.Logger:
         """Get a dedicated logger for logging command output"""
@@ -208,16 +212,11 @@ class SubprocessOperator(RuntimeOperator):
                 yield process
             except subprocess.CalledProcessError as e:
                 returncode = e.returncode
-                for stream_output in (
-                    getattr(e, "stderr", None),
-                    getattr(e, "stdout", None) or getattr(e, "output", None),
-                ):
+                for stream_output in (e.stdout, e.stderr):
                     if not stream_output:
                         continue
                     for line in stream_output.splitlines():
-                        stripped = line.rstrip()
-                        if stripped:
-                            self._record_output_line(stripped)
+                        if stripped := self._record_output_line(line):
                             logger.debug(
                                 stripped,
                                 extra={"color": random_color.color},
