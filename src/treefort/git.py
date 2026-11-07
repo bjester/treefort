@@ -100,13 +100,17 @@ class GitRemote:
 class GitCLI(SubprocessOperator):
     command_name = "git"
 
+    def _format_command_error(self, return_status: int, command: list[str]) -> str:
+        detail = f"\n{chr(10).join(self.last_output)}" if self.last_output else ""
+        return (
+            f"Command failed, with exit status {return_status}: "
+            f"{self.command_name} {' '.join(command)}{detail}"
+        )
+
     def stream_exec(self, command: list[str], cwd: str | Path | None = None) -> int:
         return_status = super().stream_exec(command, cwd=cwd)
         if return_status != 0:
-            raise CommandError(
-                f"Command failed, with exit status {return_status}: "
-                f"{self.command_name} {' '.join(command)}"
-            )
+            raise CommandError(self._format_command_error(return_status, command))
         return return_status
 
     def clone(self, src: str, destination_dir: str):
@@ -189,13 +193,17 @@ class GitCLI(SubprocessOperator):
             if e.returncode == 1:
                 return
             raise CommandError(
-                f"Command failed, with exit status {e.returncode}: "
-                f"{self.command_name} config --get-regexp {config_pattern}"
+                self._format_command_error(e.returncode, ["config", "--get-regexp", config_pattern])
             ) from e
 
         self.stream_exec(["config", "--remove-section", f"branch.{name}"])
 
     def get_branch_head(self, branch_name: str) -> str:
         """Get the HEAD commit SHA of a given branch"""
-        with self.run(["rev-parse", branch_name]) as p:
-            return p.stdout.strip()
+        try:
+            with self.run(["rev-parse", branch_name]) as p:
+                return p.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            raise CommandError(
+                self._format_command_error(e.returncode, ["rev-parse", branch_name])
+            ) from e

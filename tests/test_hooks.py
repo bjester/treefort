@@ -7,7 +7,7 @@ from unittest import TestCase, mock
 from unittest.mock import Mock
 
 from treefort.context import Context
-from treefort.errors import HookExistsError
+from treefort.errors import HookError, HookExistsError
 from treefort.hooks import Hook, Hooks
 
 
@@ -77,6 +77,25 @@ class HooksTestCase(TestCase):
 
         self.assertTrue(self.hooks.fire(Hook.pre_init, "arg1"))
         mock_stream_exec.assert_called_once_with([str(hook_file), "arg1"])
+
+    @mock.patch.object(Hooks, "stream_exec")
+    @mock.patch.object(Hooks, "_check_allowed")
+    def test_fire__failure_includes_last_output_in_hook_error(
+        self, mock_check_allowed, mock_stream_exec
+    ):
+        hook_file = self.hooks_path / Hook.pre_init.name
+        hook_file.write_bytes(b"exit 2")
+        hook_file.chmod(hook_file.stat().st_mode | stat.S_IEXEC)
+
+        mock_check_allowed.return_value = True
+        mock_stream_exec.return_value = 2
+        self.hooks.last_output = ["permission denied: /etc/hosts"]
+
+        with self.assertRaises(HookError) as ctx:
+            self.hooks.fire(Hook.pre_init, "arg1")
+
+        self.assertIn("Hook pre_init failed with exit code 2", str(ctx.exception))
+        self.assertIn("permission denied: /etc/hosts", str(ctx.exception))
 
     @mock.patch.object(Hooks, "_check_allowed")
     @mock.patch.object(Hooks, "stream_exec")

@@ -137,6 +137,16 @@ class GitCLITestCase(TestCase):
         with self.assertRaises(CommandError):
             self.cli.stream_exec(["foo", "bar"], cwd=None)
 
+    def test_stream_exec__non_zero_exit_includes_last_output(self):
+        self.mock_stream_exec.return_value = 128
+        self.cli.last_output = ["fatal: a branch named 'foo' already exists"]
+
+        with self.assertRaises(CommandError) as ctx:
+            self.cli.stream_exec(["worktree", "add", "-b", "foo", "--", "foo", "main"])
+
+        self.assertIn("Command failed, with exit status 128", str(ctx.exception))
+        self.assertIn("fatal: a branch named 'foo' already exists", str(ctx.exception))
+
     def test_clone(self):
         self.cli.clone("src_uri", "dest_dir")
         self.mock_stream_exec.assert_called_once_with(
@@ -284,6 +294,25 @@ class GitCLITestCase(TestCase):
         result = self.cli.get_branch_head("feature-branch")
         mock_run.assert_called_once_with(["rev-parse", "feature-branch"])
         self.assertEqual(result, "abc123def456")
+
+    def test_get_branch_head__translates_called_process_error_with_last_output(self):
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        self.cli.last_output = ["fatal: ambiguous argument 'missing': unknown revision"]
+        mock_run.return_value.__enter__.side_effect = subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["git", "rev-parse", "missing"],
+        )
+
+        with self.assertRaises(CommandError) as ctx:
+            self.cli.get_branch_head("missing")
+
+        self.assertIn(
+            "Command failed, with exit status 128: git rev-parse missing", str(ctx.exception)
+        )
+        self.assertIn("fatal: ambiguous argument 'missing': unknown revision", str(ctx.exception))
 
 
 class GitCLIDeleteBranchIfHeadTestCase(TestCase):

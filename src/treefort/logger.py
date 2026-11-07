@@ -1,9 +1,12 @@
 """Logging utility for treefort CLI."""
 
 import logging
+import os
+import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 # ANSI color codes
 COLORS = {
@@ -15,8 +18,22 @@ COLORS = {
     "cyan": "\033[96m",
     "reset": "\033[0m",
 }
+ANSI_ESCAPE_RE = re.compile(r"\033\]8;[^;\033\007]*;.*?(?:\033\\|\007)|\033\[[0-9;]*[a-zA-Z]")
 MAX_LOG_SIZE = 10 * 1024 * 1024
 LOG_BACKUP = 5
+
+
+def _should_use_color(stream: Any) -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    return bool(hasattr(stream, "isatty") and stream.isatty())
+
+
+class PlainFileFormatter(logging.Formatter):
+    """Formatter that strips ANSI SGR and OSC 8 escape sequences for file logs."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return ANSI_ESCAPE_RE.sub("", super().format(record))
 
 
 class ColorFormatter(logging.Formatter):
@@ -27,6 +44,11 @@ class ColorFormatter(logging.Formatter):
         logging.WARNING: COLORS["yellow"],
         logging.ERROR: COLORS["red"],
         logging.CRITICAL: COLORS["red"],
+    }
+    LEVEL_PREFIXES = {
+        logging.WARNING: "▲ ",
+        logging.ERROR: "✗ ",
+        logging.CRITICAL: "✗ ",
     }
 
     def __init__(self, fmt: str, use_color: bool = True, base_logger_name: str | None = None):
@@ -46,7 +68,11 @@ class ColorFormatter(logging.Formatter):
         message = super().format(record).replace(f"{self.user_dir}/", "~/")
         if self.base_logger_name and not record.name.startswith(self.base_logger_name):
             message = f"{record.name} | {message}"
-        if self.use_color and color_code:
+        prefix = self.LEVEL_PREFIXES.get(record.levelno, "")
+        message = f"{prefix}{message}"
+        if not self.use_color:
+            return ANSI_ESCAPE_RE.sub("", message)
+        if color_code:
             return f"{color_code}{message}{COLORS['reset']}"
         return message
 
@@ -68,22 +94,34 @@ def setup_logger(
     :param max_log_size: Maximum size of log files in bytes
     :return: Configured logger
     """
-    logger_level = logging.DEBUG if verbose else logging.INFO
+    console_level = logging.DEBUG if verbose else logging.INFO
     handlers: list[logging.Handler] = []
 
-    # Console formatter - colored, no timestamp for user-facing output
+    # Console formatters - colored, no timestamp for user-facing output
     console_fmt = "%(message)s"
-    console_formatter = ColorFormatter(
+    stdout_formatter = ColorFormatter(
         console_fmt,
-        use_color=sys.stdout.isatty(),
+        use_color=_should_use_color(sys.stdout),
+        base_logger_name=name,
+    )
+    stderr_formatter = ColorFormatter(
+        console_fmt,
+        use_color=_should_use_color(sys.stderr),
         base_logger_name=name,
     )
 
-    # Console handler
+    # Stdout console handler (DEBUG/INFO only)
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(console_formatter)
+    console_handler.setLevel(console_level)
+    console_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+    console_handler.setFormatter(stdout_formatter)
     handlers.append(console_handler)
+
+    # Stderr console handler (WARNING/ERROR/CRITICAL)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(stderr_formatter)
+    handlers.append(stderr_handler)
 
     # File handlers (if log_dir provided)
     if log_dir:
@@ -92,7 +130,7 @@ def setup_logger(
         # Default log file - timestamps and commands
         default_log_file = log_dir / "treefort.log"
         file_fmt = "%(asctime)s [%(levelname)s] %(name)s | %(message)s"
-        file_formatter = logging.Formatter(file_fmt, datefmt="%Y-%m-%d %H:%M:%S")
+        file_formatter = PlainFileFormatter(file_fmt, datefmt="%Y-%m-%d %H:%M:%S")
 
         file_handler = RotatingFileHandler(
             default_log_file, maxBytes=max_log_size, backupCount=LOG_BACKUP, encoding="utf-8"
@@ -104,7 +142,7 @@ def setup_logger(
         # Debug log file (if verbose or debug_log_path specified)
         if verbose or debug_log_path:
             debug_file = debug_log_path or (log_dir / "treefort-debug.log")
-            debug_formatter = logging.Formatter(
+            debug_formatter = PlainFileFormatter(
                 "%(asctime)s [%(levelname)s] %(name)s | %(message)s",
                 datefmt="%Y-%m-%d %H:%M:%S",
             )
@@ -116,16 +154,13 @@ def setup_logger(
             debug_handler.setFormatter(debug_formatter)
             handlers.append(debug_handler)
 
-            # Also log command output to debug file
-            console_handler.setLevel(logging.DEBUG)
-
     logging.basicConfig(
-        level=logger_level,
+        level=logging.DEBUG,
         handlers=handlers,
         force=True,
     )
 
     logger = logging.getLogger(name)
-    logger.setLevel(logger_level)
+    logger.setLevel(logging.DEBUG)
 
     return logger
