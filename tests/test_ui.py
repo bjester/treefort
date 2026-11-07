@@ -24,16 +24,22 @@ class StubStream:
     def __init__(self, isatty: bool = True):
         self._isatty = isatty
         self.chunks: list[str] = []
+        self.written = threading.Event()
 
     def isatty(self) -> bool:
         return self._isatty
 
     def write(self, text: str) -> int:
         self.chunks.append(text)
+        self.written.set()
         return len(text)
 
     def flush(self) -> None:
         pass
+
+    def wait_for_write(self, timeout: float = 5.0) -> bool:
+        """Block until the render thread writes, so tests need no fixed sleep to observe it."""
+        return self.written.wait(timeout)
 
     @property
     def output(self) -> str:
@@ -279,7 +285,7 @@ class UITestCase(unittest.TestCase):
             mock.patch.object(ui, "SPINNER_INTERVAL", 0.001),
         ):
             with ui.spinner("Fetching..."):
-                time.sleep(0.05)
+                self.assertTrue(stream.wait_for_write())
 
         output = stream.output
         self.assertIn("Fetching...", output)
@@ -292,13 +298,14 @@ class UITestCase(unittest.TestCase):
         with (
             mock.patch.object(ui.sys, "stderr", stream),
             mock.patch.object(ui, "is_color_enabled", return_value=True),
-            mock.patch.object(ui, "SPINNER_INTERVAL", 0.001),
+            mock.patch.object(ui, "SPINNER_INTERVAL", 0.01),
         ):
             with ui.spinner("Fetching..."):
-                time.sleep(0.02)
+                self.assertTrue(stream.wait_for_write())
 
         length_after_exit = len(stream.output)
-        time.sleep(0.02)
+        # wait out several render intervals: a surviving thread would keep appending frames
+        time.sleep(0.1)
 
         self.assertEqual(len(stream.output), length_after_exit)
 
@@ -327,11 +334,9 @@ class UITestCase(unittest.TestCase):
 
         self.assertTrue(stream.output.endswith(CLEAR_LINE))
 
-
-class SpinnerThreadTestCase(unittest.TestCase):
     def test_spinner__terminates_background_thread(self):
-        stream = StubStream(isatty=True)
-        baseline = threading.active_count()
+        stream = self.tty_stream()
+        before = set(threading.enumerate())
 
         with (
             mock.patch.object(ui.sys, "stderr", stream),
@@ -339,6 +344,6 @@ class SpinnerThreadTestCase(unittest.TestCase):
             mock.patch.object(ui, "SPINNER_INTERVAL", 0.001),
         ):
             with ui.spinner("Fetching..."):
-                time.sleep(0.02)
+                self.assertTrue(stream.wait_for_write())
 
-        self.assertEqual(threading.active_count(), baseline)
+        self.assertEqual(set(threading.enumerate()) - before, set())
