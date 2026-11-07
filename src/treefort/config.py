@@ -273,6 +273,11 @@ class RepositoryConfig(SettingsConfig):
         return self._data.get("default_branch", "main")
 
     @property
+    def last_worktree(self) -> str | None:
+        """The name of the worktree the user last switched away from."""
+        return self._data.get("last_worktree")
+
+    @property
     def owner(self) -> str:
         return self._data.get("owner")
 

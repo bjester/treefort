@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 from contextlib import contextmanager
@@ -11,6 +12,14 @@ from treefort.config import (
 )
 from treefort.errors import AncestorNotFoundError, ProjectNotFoundError
 from treefort.utils import find_up
+
+logger = logging.getLogger(__name__)
+
+# Environment variable holding the file the parent shell reads directory-change
+# directives from; set by the wrapper installed via `treefort shell-init`. The wrapper
+# always points this at an absolute path, since a relative path would resolve against
+# whatever directory the command has changed into.
+CD_FILE_ENV_VAR = "TREEFORT_CD_FILE"
 
 
 def migrate_old_config(old_dir: Path, new_dir: Path) -> bool:
@@ -91,8 +100,69 @@ class Context:
         try:
             yield
         finally:
-            os.chdir(old_cwd)
-            self.cwd = old_cwd
+            if old_cwd.exists():
+                os.chdir(old_cwd)
+                self.cwd = old_cwd
+            else:
+                # The previous directory may have been deleted by the command, such as when
+                # removing the active worktree; recover in the project root instead, or in
+                # the requested directory if the project cannot be resolved anymore.
+                try:
+                    fallback_dir = self.project_dir
+                except AncestorNotFoundError:
+                    fallback_dir = cwd_path
+                os.chdir(fallback_dir)
+                self.cwd = fallback_dir
+                self.request_cd(fallback_dir)
+
+    def request_cd(self, target_dir: Path) -> bool:
+        """Request that the parent shell change into the given directory.
+
+        Writes the resolved directory path to the file named by ``TREEFORT_CD_FILE``,
+        which the shell wrapper installed by ``treefort shell-init`` reads after the
+        command exits. A child process cannot change its parent's directory, so this
+        directive file is the only channel to move the user's shell.
+
+        :param target_dir: The directory the shell should change into
+        :return: True when shell integration is active, False when it is not
+        """
+        cd_file = os.environ.get(CD_FILE_ENV_VAR)
+        if not cd_file:
+            return False
+        try:
+            Path(cd_file).write_text(f"{target_dir.resolve()}\n", encoding="utf-8")
+        except OSError as e:
+            logger.warning(f"Could not write directory change to {cd_file}: {e}")
+        return True
+
+    def current_worktree_name(self) -> str | None:
+        """Return the name of the worktree the current directory is inside, if any.
+
+        The name is the worktree root relative to the project directory, so nested
+        worktrees report names like ``subpath/feature``, while subdirectories inside a
+        worktree report the worktree they belong to. Returns ``None`` at the project
+        root, inside the ``.bare`` repository, or outside the project entirely.
+
+        Directories holding a nested git repository, such as a submodule or a vendored
+        clone, are reported as if they were worktree roots; callers that need an exact
+        match should validate the name against the project's actual worktrees.
+
+        :return: The worktree name, or ``None`` when not inside a worktree
+        """
+        try:
+            project_dir = self.project_dir.resolve()
+        except AncestorNotFoundError:
+            return None
+
+        try:
+            git_path = find_up(".git", self.cwd)
+        except AncestorNotFoundError:
+            return None
+
+        worktree_root = git_path.parent
+        if worktree_root == project_dir or not worktree_root.is_relative_to(project_dir):
+            return None
+        return worktree_root.relative_to(project_dir).as_posix()
 
     def migrate(self):
         if self._migrated:

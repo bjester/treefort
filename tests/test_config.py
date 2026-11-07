@@ -96,6 +96,18 @@ class RepositoryConfigTestCase(TestCase):
         self.assertEqual(loaded.get("owner"), "octo")
         self.assertEqual(loaded.get("name"), "repo")
 
+    def test_last_worktree__defaults_to_none_and_round_trips(self):
+        io = TomlConfigIO(self.tmp_path / "config.toml")
+        config = RepositoryConfig(io)
+        self.assertIsNone(config.last_worktree)
+
+        config.update(last_worktree="feature-a")
+        config.save()
+
+        loaded = RepositoryConfig(io)
+        loaded.load()
+        self.assertEqual(loaded.last_worktree, "feature-a")
+
     def test_verbose__defaults_to_false_and_reads_boolean(self):
         io = TomlConfigIO(self.tmp_path / "config.toml")
         config = RepositoryConfig(io)
