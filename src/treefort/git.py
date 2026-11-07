@@ -10,6 +10,9 @@ from treefort.subprocess import SubprocessOperator
 TYPE_RE = re.compile(r"\((.*)\)")
 GIT_EXT_RE = re.compile(r"\.git$", re.IGNORECASE)
 
+# Git records checked-out local branches in worktree listings as this ref prefix.
+LOCAL_BRANCH_REF_PREFIX = "refs/heads/"
+
 
 class GitUri:
     """Value object for parsing and matching GitHub repository URIs."""
@@ -180,7 +183,7 @@ class GitCLI(SubprocessOperator):
 
     def delete_branch_if_head(self, name: str, expected_head: str):
         """Delete a local branch only if it still points to the expected commit."""
-        self.stream_exec(["update-ref", "-d", f"refs/heads/{name}", expected_head])
+        self.stream_exec(["update-ref", "-d", f"{LOCAL_BRANCH_REF_PREFIX}{name}", expected_head])
         self._remove_branch_config(name)
 
     def _remove_branch_config(self, name: str):

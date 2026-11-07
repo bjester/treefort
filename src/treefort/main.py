@@ -8,6 +8,7 @@ from treefort.commands.init import InitCommand
 from treefort.commands.install import InstallCommand
 from treefort.commands.prune import PruneCommand
 from treefort.commands.remove import RemoveCommand
+from treefort.commands.switch import SwitchCommand
 from treefort.errors import AliasConflictError
 from treefort.runtime import Runtime
 
@@ -33,6 +34,7 @@ class WorktreeCommands(Command):
         self._add(InstallCommand(self._runtime))
         self._add(RemoveCommand(self._runtime))
         self._add(PruneCommand(self._runtime))
+        self._add(SwitchCommand(self._runtime))
 
     def _add(self, command: Command):
         """

@@ -1,8 +1,8 @@
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import treefort.cli as cli_module
-from treefort.cli import main, replace_alias, replace_verbose
+from treefort.cli import main, replace_alias, replace_switch_dash, replace_verbose
 
 
 class ReplaceAliasTestCase(TestCase):
@@ -37,6 +37,7 @@ class ReplaceAliasTestCase(TestCase):
 
 class MainTestCase(TestCase):
     @patch("treefort.cli.fire.Fire")
+    @patch("treefort.cli.replace_switch_dash")
     @patch("treefort.cli.replace_alias")
     @patch("treefort.cli.replace_verbose")
     @patch("treefort.cli.WorktreeCommands")
@@ -45,6 +46,7 @@ class MainTestCase(TestCase):
         commands_cls_mock,
         replace_verbose_mock,
         replace_alias_mock,
+        replace_switch_dash_mock,
         fire_mock,
     ):
         component = Mock()
@@ -56,9 +58,24 @@ class MainTestCase(TestCase):
         replace_verbose_mock.assert_called_once_with()
         commands_cls_mock.assert_called_once_with(verbose=False)
         replace_alias_mock.assert_called_once_with(component)
+        replace_switch_dash_mock.assert_called_once_with()
         fire_mock.assert_called_once_with(component=component)
 
     @patch("treefort.cli.fire.Fire")
+    @patch("treefort.cli.WorktreeCommands")
+    @patch("treefort.cli.sys.argv", ["treefort", "switch", "-"])
+    def test_main__rewrites_bare_dash_for_switch_subcommand(self, commands_cls_mock, fire_mock):
+        component = MagicMock()
+        component._alias_map = {}
+        commands_cls_mock.return_value = component
+
+        main()
+
+        self.assertEqual(["treefort", "switch", "--target=-"], cli_module.sys.argv)
+        fire_mock.assert_called_once_with(component=component)
+
+    @patch("treefort.cli.fire.Fire")
+    @patch("treefort.cli.replace_switch_dash")
     @patch("treefort.cli.replace_alias")
     @patch("treefort.cli.replace_verbose")
     @patch("treefort.cli.WorktreeCommands")
@@ -67,6 +84,7 @@ class MainTestCase(TestCase):
         commands_cls_mock,
         replace_verbose_mock,
         replace_alias_mock,
+        replace_switch_dash_mock,
         fire_mock,
     ):
         component = Mock()
@@ -82,6 +100,7 @@ class MainTestCase(TestCase):
 
     @patch("treefort.cli.sys.exit")
     @patch("treefort.cli.fire.Fire")
+    @patch("treefort.cli.replace_switch_dash")
     @patch("treefort.cli.replace_alias")
     @patch("treefort.cli.replace_verbose")
     @patch("treefort.cli.WorktreeCommands")
@@ -90,6 +109,7 @@ class MainTestCase(TestCase):
         commands_cls_mock,
         replace_verbose_mock,
         replace_alias_mock,
+        replace_switch_dash_mock,
         fire_mock,
         exit_mock,
     ):
@@ -124,6 +144,32 @@ class MainTestCase(TestCase):
         get_logger_mock.assert_called_once_with("treefort")
         get_logger_mock.return_value.error.assert_called_once_with("Command failed: invalid config")
         exit_mock.assert_called_once_with(1)
+
+
+class ReplaceSwitchDashTestCase(TestCase):
+    @patch("treefort.cli.sys.argv", ["treefort", "switch", "-"])
+    def test_rewrites_bare_dash_after_switch_subcommand(self):
+        replace_switch_dash()
+
+        self.assertEqual(["treefort", "switch", "--target=-"], cli_module.sys.argv)
+
+    @patch("treefort.cli.sys.argv", ["treefort", "checkout", "-"])
+    def test_noop_for_other_subcommands(self):
+        replace_switch_dash()
+
+        self.assertEqual(["treefort", "checkout", "-"], cli_module.sys.argv)
+
+    @patch("treefort.cli.sys.argv", ["treefort", "switch", "feature-a"])
+    def test_noop_when_target_is_not_dash(self):
+        replace_switch_dash()
+
+        self.assertEqual(["treefort", "switch", "feature-a"], cli_module.sys.argv)
+
+    @patch("treefort.cli.sys.argv", ["treefort", "switch"])
+    def test_noop_when_target_is_missing(self):
+        replace_switch_dash()
+
+        self.assertEqual(["treefort", "switch"], cli_module.sys.argv)
 
 
 class ReplaceVerboseTestCase(TestCase):

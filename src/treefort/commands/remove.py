@@ -3,11 +3,9 @@ from pathlib import Path
 from treefort import ui
 from treefort.command import Command
 from treefort.errors import CommandError, WorktreeNotFoundError
+from treefort.git import LOCAL_BRANCH_REF_PREFIX
 from treefort.hooks import Hook
 from treefort.utils import normalize_worktree_name
-
-# Git records checked-out local branches in worktree listings as this ref prefix.
-LOCAL_BRANCH_REF_PREFIX = "refs/heads/"
 
 
 class RemoveCommand(Command):

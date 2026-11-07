@@ -21,6 +21,12 @@ class WorktreeCommandsTestCase(TestCase):
         self.assertIn("rm", alias_map)
         self.assertEqual(alias_map["rm"], "remove")
 
+    def test_alias_map__contains_switch_alias_mapping(self):
+        alias_map = self.commands._alias_map
+
+        self.assertIn("sw", alias_map)
+        self.assertEqual(alias_map["sw"], "switch")
+
     def test_alias_map__raises_when_aliases_conflict(self):
         self.commands._commands.append(SimpleNamespace(_name="duplicate", _aliases=["rm"]))
 

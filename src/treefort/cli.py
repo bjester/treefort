@@ -23,6 +23,20 @@ def replace_alias(cli: WorktreeCommands):
         sys.argv[1] = cli._alias_map[subcommand]
 
 
+def replace_switch_dash():
+    """
+    Rewrites a bare '-' target for the `switch` subcommand into a flag argument.
+
+    Fire reserves a lone '-' as its argument separator, so `treefort switch -` would
+    otherwise never deliver the previous-worktree shortcut to the command. Must run
+    after `replace_alias`, so the `sw` alias is already rewritten to `switch`.
+
+    :return: None
+    """
+    if len(sys.argv) > 2 and sys.argv[1] == "switch" and sys.argv[2] == "-":
+        sys.argv[2] = "--target=-"
+
+
 def replace_verbose():
     """
     Parses command-line arguments to determine if the verbose mode is enabled.
@@ -59,6 +73,7 @@ def main():
     try:
         component = WorktreeCommands(verbose=is_verbose)
         replace_alias(component)
+        replace_switch_dash()
 
         # we do not pass `name` here, because the CLI allows using an alias for the command. if name
         # was passed, then using `worktree -- --completion` would use the wrong name for completion
