@@ -102,10 +102,7 @@ class InitCommand(Command):
                 skip_project=True,
                 bypass_allowlist=yes,
             )
-            with ui.spinner(
-                f"Cloning {repo_target.uri}...",
-                enabled=not getattr(self._runtime, "verbose", False),
-            ):
+            with ui.spinner(f"Cloning {repo_target.uri}...", enabled=self._ui_enabled):
                 self._runtime.git.clone(repo_target.uri, ".bare")
 
                 with (project_dir / ".git").open("w", encoding="utf-8") as f:

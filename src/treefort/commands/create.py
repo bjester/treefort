@@ -42,10 +42,7 @@ class CreateCommand(Command):
             git_remote = self._runtime.get_default_remote()
             git_remote_name = git_remote.name
 
-        with ui.spinner(
-            f"Fetching {git_remote_name}...",
-            enabled=not getattr(self._runtime, "verbose", False),
-        ):
+        with ui.spinner(f"Fetching {git_remote_name}...", enabled=self._ui_enabled):
             self._runtime.git.fetch(git_remote_name)
 
         normalized_name = normalize_worktree_name(worktree_name)

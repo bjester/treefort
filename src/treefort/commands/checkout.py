@@ -119,10 +119,7 @@ class CheckoutCommand(Command):
         inpt.validate()
 
         fetch_error = False
-        with ui.spinner(
-            f"Fetching {inpt.branch_or_pr}...",
-            enabled=not getattr(self._runtime, "verbose", False),
-        ):
+        with ui.spinner(f"Fetching {inpt.branch_or_pr}...", enabled=self._ui_enabled):
             if inpt.pr_number:
                 self._runtime.git.fetch(
                     inpt.remote, f"pull/{inpt.pr_number}/head:{inpt.worktree_name}"
