@@ -162,6 +162,30 @@ class RuntimeTestCase(TestCase):
             verbose=True,
         )
 
+    def test_init__defaults_to_false_when_global_config_does_not_exist(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            home_dir = tmp_path / "home"
+            outside_dir = tmp_path / "outside"
+            home_dir.mkdir(parents=True)
+            outside_dir.mkdir(parents=True)
+            log_opener = Mock(return_value=Mock())
+
+            with (
+                patch.dict(os.environ, {"HOME": str(home_dir)}, clear=False),
+                patch("treefort.context.Path.cwd", return_value=outside_dir),
+                patch("treefort.runtime.setup_logger", log_opener),
+            ):
+                os.environ.pop("TREEFORT_VERBOSE", None)
+                runtime = Runtime(name="test", verbose=False)
+
+            self.assertFalse(runtime.verbose)
+            log_opener.assert_called_once_with(
+                "test",
+                log_dir=home_dir / ".treefort" / "logs",
+                verbose=False,
+            )
+
     def test_init__fails_fast_when_config_is_malformed(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
@@ -191,22 +215,21 @@ class RuntimeTestCase(TestCase):
                     verbose=False,
                 )
 
-                # Once repository config is valid, a malformed global config also fails fast
-                # while keeping verbose=True from repository config for logger setup.
+                # Once repository config is valid, a malformed global config also fails fast.
                 log_opener.reset_mock()
                 repo_config_path.write_text(
                     'type = "repository"\nverbose = true\n', encoding="utf-8"
                 )
                 global_config_path.write_text(
-                    'type = "repository"\nverbose = true\n', encoding="utf-8"
+                    'type = "global"\nverbose = "invalid"\n', encoding="utf-8"
                 )
-                with self.assertRaisesRegex(ConfigTypeError, "Invalid config type: repository"):
+                with self.assertRaisesRegex(ConfigTypeError, "verbose must be a boolean"):
                     Runtime(name="test", verbose=False)
 
                 log_opener.assert_called_once_with(
                     "test",
                     log_dir=home_dir / ".treefort" / "logs",
-                    verbose=True,
+                    verbose=False,
                 )
 
     def test_get_remote__no_args_raises(self):

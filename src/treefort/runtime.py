@@ -31,7 +31,8 @@ class Runtime:
 
         log_dir = self.context.global_config_dir / "logs"
         try:
-            self.verbose = self._resolve_config_verbose() or self.verbose
+            if self._resolve_config_verbose():
+                self.verbose = True
         finally:
             self.logger = setup_logger(
                 name,
@@ -51,16 +52,14 @@ class Runtime:
         Verbosity is additive across sources: any configuration level set to ``true``
         enables verbose logging.
         """
+        repo_verbose = False
         try:
-            if self.context.get_config().verbose:
-                self.verbose = True
+            repo_verbose = self.context.get_config().verbose
         except (ProjectNotFoundError, AncestorNotFoundError):
             pass
 
-        if self.context.get_global_config().verbose:
-            self.verbose = True
-
-        return self.verbose
+        global_verbose = self.context.get_global_config().verbose
+        return repo_verbose or global_verbose
 
     def get_default_remote(self) -> GitRemote | None:
         return self.get_remote(owner_name=self.context.get_config().owner)
