@@ -16,6 +16,7 @@ ANSI_RE = re.compile(r"\033\]8;[^;\033\007]*;.*?(?:\033\\|\007)|\033\[[0-9;]*[a-
 
 RESET = "\033[0m"
 CLEAR_LINE = "\r\033[K"
+OSC8_CLOSE = "\033]8;;\033\\"
 
 STYLES = {
     "bold": "\033[1m",
@@ -27,6 +28,9 @@ STYLES = {
     "magenta": "\033[95m",
     "cyan": "\033[96m",
 }
+
+# The color subset of STYLES, for callers that choose a foreground color by name
+COLORS = {name: code for name, code in STYLES.items() if name not in ("bold", "dim")}
 
 SUCCESS_GLYPH = "✓"
 STEP_GLYPH = "◎"
@@ -131,7 +135,11 @@ def link(text: str, url: str, stream: TextIO | None = None) -> str:
 
 
 def visible_len(text: str) -> int:
-    """Return the printable length of ``text``, ignoring escape sequences."""
+    """Return the printable length of ``text``, ignoring escape sequences.
+
+    Length is counted in code points, not display columns, so wide characters such as CJK text or
+    emoji are not accounted for.
+    """
     return len(strip_ansi(text))
 
 
@@ -191,6 +199,9 @@ def _truncate(text: str, width: int) -> str:
     truncated = "".join(parts)
     if "\033[" in truncated:
         truncated += RESET
+    if "\033]8;" in truncated:
+        # A link cut mid-sequence would otherwise keep the hyperlink open across later columns
+        truncated += OSC8_CLOSE
     return f"{truncated}{ELLIPSIS}"
 
 
@@ -208,7 +219,8 @@ def format_table(
 
     Column padding is measured on printable width, so cells may contain SGR styling or OSC 8
     links. Columns are truncated from the right with ``…`` when the table exceeds ``max_width``,
-    which defaults to the terminal width.
+    which defaults to the terminal width. No column is narrowed below ``MIN_COLUMN_WIDTH``, so a
+    table with too many columns can still exceed ``max_width``.
     """
     widths = _column_widths(headers, rows)
     if not widths:
@@ -225,7 +237,7 @@ def format_table(
         )
         return line.rstrip()
 
-    lines = [dim(render(headers))]
+    lines = [dim(render(headers))] if headers else []
     lines.extend(render(row) for row in rows)
     return "\n".join(lines)
 
@@ -248,12 +260,30 @@ def format_tree(root_label: str, children: list[tuple[str, list]]) -> str:
     return "\n".join(lines)
 
 
+def _emit(stream: TextIO, text: str) -> bool:
+    """Write ``text`` to ``stream``, returning whether the write succeeded.
+
+    Terminal streams can disappear mid-render, such as when the reading end closes. Spinner output
+    is cosmetic, so a failed write must never displace the error that ended the surrounding work.
+    """
+    try:
+        stream.write(text)
+        stream.flush()
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 @contextmanager
 def spinner(message: str, enabled: bool = True):
     """Render a transient braille spinner on ``stderr`` while the body runs.
 
     The spinner is a no-op when disabled, when ``NO_COLOR`` is set, or when ``stderr`` is not a
     TTY. The rendered line is always cleared on exit, including when the body raises.
+
+    Frames are written without a trailing newline and cleared with each redraw, so log records
+    emitted inside the body are erased by the next frame. Only wrap work whose logging stays at
+    ``DEBUG``; user-facing output belongs outside the spinner.
     """
     stream = sys.stderr
     if not (enabled and is_color_enabled(stream)):
@@ -266,8 +296,8 @@ def spinner(message: str, enabled: bool = True):
         frame_index = 0
         while not stop.is_set():
             frame = SPINNER_FRAMES[frame_index % len(SPINNER_FRAMES)]
-            stream.write(f"{CLEAR_LINE}{cyan(frame, stream)} {message}")
-            stream.flush()
+            if not _emit(stream, f"{CLEAR_LINE}{cyan(frame, stream)} {message}"):
+                break
             frame_index += 1
             stop.wait(SPINNER_INTERVAL)
 
@@ -278,5 +308,4 @@ def spinner(message: str, enabled: bool = True):
     finally:
         stop.set()
         thread.join(timeout=SPINNER_JOIN_TIMEOUT)
-        stream.write(CLEAR_LINE)
-        stream.flush()
+        _emit(stream, CLEAR_LINE)

@@ -1,3 +1,6 @@
+import io
+import logging
+import os
 import shlex
 import subprocess
 import tempfile
@@ -5,6 +8,7 @@ from pathlib import Path
 from unittest import TestCase, mock
 from unittest.mock import MagicMock, Mock
 
+from treefort.logger import setup_logger
 from treefort.subprocess import SubprocessOperator, _log_name
 
 
@@ -119,6 +123,10 @@ class SubprocessOperatorTestCase(TestCase):
         self.assertEqual(exit_code, 0)
         self.child_logger.info.assert_has_calls([mock.call("  │ line1"), mock.call("  │ line2")])
         self.assertEqual(self.child_logger.info.call_count, 2)
+        # the gutter is the only destination: no duplicate colorized debug trace per line
+        debug_messages = [call.args[0] for call in self.child_command_logger.debug.call_args_list]
+        self.assertNotIn("line1", debug_messages)
+        self.assertNotIn("line2", debug_messages)
 
     @mock.patch("treefort.subprocess.subprocess.Popen")
     def test_stream_exec__stream_info_disabled_logs_no_info(self, mock_popen):
@@ -236,3 +244,77 @@ class LogNameTestCase(TestCase):
 
     def test_arg_limit(self):
         self.assertEqual(_log_name(["git", "diff", "--", "path/to/file"]), "git")
+
+
+class StreamInfoConsoleTestCase(TestCase):
+    """Exercise gutter streaming through the real logger wiring rather than a mocked logger.
+
+    The command prints an upper-cased payload so the output can be told apart from the command
+    line that the logger also records.
+    """
+
+    COMMAND = ["bash", "-c", "echo 'hook says hi' | tr a-z A-Z"]
+    PAYLOAD = "HOOK SAYS HI"
+
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp_dir.name)
+        self.stdout = io.StringIO()
+        self.stderr = io.StringIO()
+
+        root = logging.getLogger()
+        self._orig_handlers = list(root.handlers)
+        self._orig_level = root.level
+
+        context = Mock()
+        context.cwd = self.tmp_path
+        self.context = context
+
+    def tearDown(self):
+        root = logging.getLogger()
+        for handler in list(root.handlers):
+            if handler not in self._orig_handlers:
+                root.removeHandler(handler)
+                handler.close()
+        for handler in self._orig_handlers:
+            if handler not in root.handlers:
+                root.addHandler(handler)
+        root.setLevel(self._orig_level)
+        self.tmp_dir.cleanup()
+
+    def build_operator(self, verbose: bool) -> SubprocessOperator:
+        with (
+            mock.patch.dict(os.environ, {"NO_COLOR": "1"}),
+            mock.patch("treefort.logger.sys.stdout", self.stdout),
+            mock.patch("treefort.logger.sys.stderr", self.stderr),
+        ):
+            logger = setup_logger(
+                "treefort-wiring", log_dir=self.tmp_path / "logs", verbose=verbose
+            )
+        return SubprocessOperator(self.context, logger)
+
+    def console_payload_lines(self) -> list[str]:
+        return [line for line in self.stdout.getvalue().splitlines() if self.PAYLOAD in line]
+
+    def test_stream_exec__stream_info_prints_gutter_once_without_verbose(self):
+        operator = self.build_operator(verbose=False)
+
+        operator.stream_exec(self.COMMAND, stream_info=True)
+
+        self.assertEqual(self.console_payload_lines(), [f"  │ {self.PAYLOAD}"])
+
+    def test_stream_exec__stream_info_prints_gutter_once_when_verbose(self):
+        operator = self.build_operator(verbose=True)
+
+        operator.stream_exec(self.COMMAND, stream_info=True)
+
+        self.assertEqual(self.console_payload_lines(), [f"  │ {self.PAYLOAD}"])
+
+    def test_stream_exec__stream_info_records_payload_once_in_log_file(self):
+        operator = self.build_operator(verbose=False)
+
+        operator.stream_exec(self.COMMAND, stream_info=True)
+
+        log_text = (self.tmp_path / "logs" / "treefort.log").read_text()
+        self.assertEqual(log_text.count(self.PAYLOAD), 1)
+        self.assertIn(f"│ {self.PAYLOAD}", log_text)

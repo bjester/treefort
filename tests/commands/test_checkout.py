@@ -241,12 +241,21 @@ class CheckoutCommandTestCase(TestCase):
 
         spinner.assert_called_once_with("Fetching feature...", enabled=True)
 
-    def test_call__spins_while_resolving_pr(self):
-        self.gh.pr_status.return_value = {"headRefName": "feature"}
+    def test_call__resolves_pr_inside_spinner(self):
+        events = []
+
+        def record_pr_status(*args, **kwargs):
+            events.append("pr_status")
+            return {"headRefName": "feature"}
+
+        self.gh.pr_status.side_effect = record_pr_status
 
         with patch("treefort.commands.checkout.ui.spinner") as spinner:
+            spinner.return_value.__enter__.side_effect = lambda *args: events.append("enter")
+            spinner.return_value.__exit__.side_effect = lambda *args: events.append("exit")
             self.command("1234")
 
+        self.assertEqual(events, ["enter", "pr_status", "exit"])
         spinner.assert_called_once_with("Fetching 1234...", enabled=True)
 
     def test_call__disables_spinner_when_verbose(self):

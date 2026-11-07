@@ -40,6 +40,19 @@ class StubStream:
         return "".join(self.chunks)
 
 
+class BrokenStream:
+    """Text stream double whose writes fail, as when the terminal disappears."""
+
+    def isatty(self) -> bool:
+        return True
+
+    def write(self, text: str) -> int:
+        raise ValueError("I/O operation on closed file")
+
+    def flush(self) -> None:
+        pass
+
+
 class UITestCase(unittest.TestCase):
     def tty_stream(self) -> StubStream:
         return StubStream(isatty=True)
@@ -188,6 +201,23 @@ class UITestCase(unittest.TestCase):
 
         self.assertEqual(table, "NAME  DESC\nfeat  a very long d…")
 
+    def test_format_table__closes_hyperlinks_cut_by_truncation(self):
+        linked = ui.link("a very long PR title", "https://example.test/pr/1", self.tty_stream())
+
+        with self.no_color():
+            table = ui.format_table(["REF"], [[linked]], max_width=8)
+
+        # one opener plus one closer: the link must not stay open past the truncated cell
+        self.assertEqual(table.count("\033]8;;"), 2)
+        self.assertTrue(table.endswith("…"))
+        self.assertEqual(ui.visible_len(table.splitlines()[1]), 8)
+
+    def test_format_table__omits_header_line_without_headers(self):
+        with self.no_color():
+            table = ui.format_table([], [["a", "b"]])
+
+        self.assertEqual(table, "a  b")
+
     def test_format_table__uses_terminal_width_by_default(self):
         with self.no_color(), mock.patch.object(ui.shutil, "get_terminal_size") as size:
             size.return_value = os.terminal_size((20, 24))
@@ -271,6 +301,17 @@ class UITestCase(unittest.TestCase):
         time.sleep(0.02)
 
         self.assertEqual(len(stream.output), length_after_exit)
+
+    def test_spinner__preserves_body_exception_when_cleanup_fails(self):
+        stream = BrokenStream()
+
+        with (
+            mock.patch.object(ui.sys, "stderr", stream),
+            mock.patch.object(ui, "is_color_enabled", return_value=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                with ui.spinner("Fetching..."):
+                    raise RuntimeError("boom")
 
     def test_spinner__clears_line_when_body_raises(self):
         stream = self.tty_stream()

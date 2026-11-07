@@ -85,12 +85,15 @@ class HooksTestCase(TestCase):
         hook_file.write_bytes(b"echo ok")
         hook_file.chmod(hook_file.stat().st_mode | stat.S_IEXEC)
 
+        events = []
         mock_check_allowed.return_value = True
-        mock_stream_exec.return_value = 0
+        mock_stream_exec.side_effect = lambda *args, **kwargs: events.append("stream") or 0
+        self.hooks.logger.info.side_effect = lambda *args, **kwargs: events.append("header")
 
         with mock.patch("treefort.ui.is_color_enabled", return_value=False):
             self.hooks.fire(Hook.pre_init)
 
+        self.assertEqual(events, ["header", "stream"])
         self.hooks.logger.info.assert_called_once_with("◎ Running hook pre_init")
 
     @mock.patch.object(Hooks, "stream_exec")

@@ -58,8 +58,8 @@ class RemoveCommand(Command):
                 branch_name = self._resolve_branch_name(worktree_path)
 
             self._runtime.git.remove_worktree(worktree_name, force=force)
-            self._logger.info(ui.success(f"Removed worktree {ui.bold(worktree_name)}"))
 
+            deleted_branch: str | None = None
             if delete_branch:
                 if branch_name is None:
                     self._logger.warning(
@@ -72,11 +72,15 @@ class RemoveCommand(Command):
                     except CommandError as e:
                         self._logger.warning(f"Failed to delete branch '{branch_name}': {e}")
                     else:
-                        self._logger.info(ui.success(f"Deleted branch {ui.bold(branch_name)}"))
+                        deleted_branch = branch_name
 
             self._runtime.hooks.fire(
                 Hook.post_remove, worktree_name, normalized_name, bypass_allowlist=yes
             )
+
+            self._logger.info(ui.success(f"Removed worktree {ui.bold(worktree_name)}"))
+            if deleted_branch:
+                self._logger.info(ui.success(f"Deleted branch {ui.bold(deleted_branch)}"))
 
     def _resolve_branch_name(self, worktree_path: Path) -> str | None:
         """Return the name of the local branch checked out in the worktree at the given path.

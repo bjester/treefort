@@ -15,8 +15,10 @@ from typing import Any
 from treefort import ui
 from treefort.operator import RuntimeOperator
 
-# These are the allowed colors for command output, to avoid conflict with red/yellow errors/warnings
-ALLOWED_COLORS = ["green", "blue", "magenta", "cyan"]
+# Command traces are DEBUG-only and carry no level glyph, so a color never competes with the
+# semantic rendering of a warning (▲) or error (✗) on stderr. Any palette color is therefore
+# usable to tell one command's output apart from another's in verbose mode.
+COMMAND_COLORS = list(ui.COLORS)
 MAX_OUTPUT_TAIL = 20
 
 
@@ -75,7 +77,7 @@ class RandomColorDecorator(ContextDecorator):
     def __enter__(self):
         self._state.depth += 1
         if self._state.color is None:
-            self._state.color = random.choice(ALLOWED_COLORS)
+            self._state.color = random.choice(COMMAND_COLORS)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._state.depth -= 1
@@ -141,7 +143,7 @@ class SubprocessOperator(RuntimeOperator):
         deadline = time.monotonic() + self.wait_time
 
         try:
-            color = ALLOWED_COLORS[process.pid % len(ALLOWED_COLORS)]
+            color = COMMAND_COLORS[process.pid % len(COMMAND_COLORS)]
             self.logger.debug(f"Executing: {shlex.join(command)}", extra={"color": color})
             logger.debug(f"START: {shlex.join(command)}", extra={"color": color})
 
@@ -163,11 +165,14 @@ class SubprocessOperator(RuntimeOperator):
                     continue
 
                 stripped = self._record_output_line(line)
-                logger.debug(
-                    stripped,
-                    extra={"color": color},
-                )
-                if stream_info and stripped:
+                # A line has exactly one destination: the console gutter when the caller wants
+                # live output, otherwise the colorized debug trace.
+                if not stream_info:
+                    logger.debug(
+                        stripped,
+                        extra={"color": color},
+                    )
+                elif stripped:
                     self.logger.info(ui.gutter(stripped))
 
             process.wait()
