@@ -61,7 +61,7 @@ def main():
         # was passed, then using `worktree -- --completion` would use the wrong name for completion
         fire.Fire(component=component)
     except Exception as e:
-        if is_verbose:
+        if is_verbose or getattr(component._runtime, "verbose", False) is True:
             raise
         component._logger.error(f"Command failed: {str(e)}")
         sys.exit(1)

@@ -1,9 +1,13 @@
+import os
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import DEFAULT, Mock, PropertyMock, patch
 
-from treefort.errors import RemoteUsageError
+import tomlkit.exceptions
+
+from treefort.errors import AncestorNotFoundError, ConfigTypeError, RemoteUsageError
 from treefort.git import GitRemote
 from treefort.runtime import Runtime
 
@@ -85,6 +89,163 @@ class RuntimeTestCase(TestCase):
         self.assertEqual(runtime.logger, logger)
         for operator in operators.values():
             operator.assert_called_once()
+
+    def test_init__resolves_verbose_from_env_var(self):
+        context = Mock()
+        context.global_config_dir = Path("/tmp/treefort-global-config")
+        log_opener = Mock(return_value=Mock())
+
+        with (
+            patch.dict(os.environ, {"TREEFORT_VERBOSE": "1"}),
+            patch("treefort.runtime.Context", return_value=context),
+            patch("treefort.runtime.setup_logger", log_opener),
+            patch("treefort.runtime.Hooks"),
+            patch("treefort.runtime.GitCLI"),
+            patch("treefort.runtime.GithubCLI"),
+            patch("treefort.runtime.Templates"),
+        ):
+            runtime = Runtime(name="test", verbose=False)
+
+        self.assertTrue(runtime.verbose)
+        log_opener.assert_called_once_with(
+            "test",
+            log_dir=Path("/tmp/treefort-global-config/logs"),
+            verbose=True,
+        )
+
+    def test_init__resolves_verbose_from_repository_config(self):
+        context = Mock()
+        context.global_config_dir = Path("/tmp/treefort-global-config")
+        context.get_config.return_value = SimpleNamespace(verbose=True)
+        context.get_global_config.return_value = SimpleNamespace(verbose=False)
+        log_opener = Mock(return_value=Mock())
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch("treefort.runtime.Context", return_value=context),
+            patch("treefort.runtime.setup_logger", log_opener),
+            patch("treefort.runtime.Hooks"),
+            patch("treefort.runtime.GitCLI"),
+            patch("treefort.runtime.GithubCLI"),
+            patch("treefort.runtime.Templates"),
+        ):
+            os.environ.pop("TREEFORT_VERBOSE", None)
+            runtime = Runtime(name="test", verbose=False)
+
+        self.assertTrue(runtime.verbose)
+        log_opener.assert_called_once_with(
+            "test",
+            log_dir=Path("/tmp/treefort-global-config/logs"),
+            verbose=True,
+        )
+
+    def test_init__resolves_verbose_from_global_config_when_outside_project(self):
+        context = Mock()
+        context.global_config_dir = Path("/tmp/treefort-global-config")
+        context.get_config.side_effect = AncestorNotFoundError("not in a project")
+        context.get_global_config.return_value = SimpleNamespace(verbose=True)
+        log_opener = Mock(return_value=Mock())
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch("treefort.runtime.Context", return_value=context),
+            patch("treefort.runtime.setup_logger", log_opener),
+            patch("treefort.runtime.Hooks"),
+            patch("treefort.runtime.GitCLI"),
+            patch("treefort.runtime.GithubCLI"),
+            patch("treefort.runtime.Templates"),
+        ):
+            os.environ.pop("TREEFORT_VERBOSE", None)
+            runtime = Runtime(name="test", verbose=False)
+
+        self.assertTrue(runtime.verbose)
+        log_opener.assert_called_once_with(
+            "test",
+            log_dir=Path("/tmp/treefort-global-config/logs"),
+            verbose=True,
+        )
+        runtime.logger.warning.assert_not_called()
+
+    def test_init__falls_back_to_false_when_config_is_malformed(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            home_dir = tmp_path / "home"
+            project_dir = tmp_path / "project"
+            (project_dir / ".bare").mkdir(parents=True)
+            (project_dir / ".treefort").mkdir(parents=True)
+            (home_dir / ".treefort").mkdir(parents=True)
+            (project_dir / ".treefort" / "config.toml").write_text(
+                "invalid = [toml", encoding="utf-8"
+            )
+            (home_dir / ".treefort" / "config.toml").write_text(
+                'type = "repository"\nverbose = true\n', encoding="utf-8"
+            )
+            logger = Mock()
+            log_opener = Mock(return_value=logger)
+
+            with (
+                patch.dict(os.environ, {"HOME": str(home_dir)}, clear=False),
+                patch("treefort.context.Path.cwd", return_value=project_dir),
+                patch("treefort.runtime.setup_logger", log_opener),
+                patch("treefort.runtime.Hooks"),
+                patch("treefort.runtime.GitCLI"),
+                patch("treefort.runtime.GithubCLI"),
+                patch("treefort.runtime.Templates"),
+            ):
+                os.environ.pop("TREEFORT_VERBOSE", None)
+                runtime = Runtime(name="test", verbose=False)
+
+                self.assertFalse(runtime.verbose)
+                log_opener.assert_called_once_with(
+                    "test",
+                    log_dir=home_dir / ".treefort" / "logs",
+                    verbose=False,
+                )
+                self.assertEqual(logger.warning.call_count, 2)
+                self.assertIn(
+                    "Ignoring invalid repository configuration for verbose mode:",
+                    logger.warning.call_args_list[0][0][0],
+                )
+                self.assertIn(
+                    "Ignoring invalid global configuration for verbose mode: "
+                    "Invalid config type: repository",
+                    logger.warning.call_args_list[1][0][0],
+                )
+                with self.assertRaises(tomlkit.exceptions.TOMLKitError):
+                    runtime.context.get_config()
+                with self.assertRaises(ConfigTypeError):
+                    runtime.context.get_global_config()
+
+    def test_resolve_config_verbose__catches_config_and_os_errors(self):
+        context = Mock()
+        context.global_config_dir = Path("/tmp/treefort-global-config")
+        context.get_config.side_effect = ConfigTypeError("bad type")
+        context.get_global_config.side_effect = OSError("cannot read")
+        logger = Mock()
+        log_opener = Mock(return_value=logger)
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch("treefort.runtime.Context", return_value=context),
+            patch("treefort.runtime.setup_logger", log_opener),
+            patch("treefort.runtime.Hooks"),
+            patch("treefort.runtime.GitCLI"),
+            patch("treefort.runtime.GithubCLI"),
+            patch("treefort.runtime.Templates"),
+        ):
+            os.environ.pop("TREEFORT_VERBOSE", None)
+            runtime = Runtime(name="test", verbose=False)
+
+        self.assertFalse(runtime.verbose)
+        context.get_config.assert_called_once_with()
+        context.get_global_config.assert_called_once_with()
+        self.assertEqual(
+            [call[0][0] for call in logger.warning.call_args_list],
+            [
+                "Ignoring invalid repository configuration for verbose mode: bad type",
+                "Ignoring invalid global configuration for verbose mode: cannot read",
+            ],
+        )
 
     def test_get_remote__no_args_raises(self):
         with self.assertRaises(RemoteUsageError, msg="Must provide either owner_name or name"):

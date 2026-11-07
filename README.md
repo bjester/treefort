@@ -19,6 +19,7 @@ A CLI tool that helps you manage Git worktrees. Built as a GitHub CLI (`gh`) ext
   - [Directory Structure](#directory-structure)
   - [Hooks](#hooks)
   - [Templates](#templates)
+  - [Logging and Verbosity](#logging-and-verbosity)
 - [Commands](#commands)
   - [init](#commands-init)
   - [create](#commands-create)
@@ -162,6 +163,18 @@ ${REPO_NAME}.${WORKTREE_NAME_NORMALIZED}
 **Result in worktree:** `.idea/.name` contains `treefort.feat-my-branch`
 
 </details>
+
+### Logging and Verbosity
+
+Treefort writes diagnostic logs to `~/.treefort/logs/treefort.log` on every run. Warnings and errors are written to `stderr` so `stdout` stays clean for scripts and pipes.
+
+To stream debug logs and full error tracebacks to the terminal, enable verbose mode with any of these options:
+
+- Pass `-v` or `--verbose` on the command line.
+- Set the `TREEFORT_VERBOSE=1` environment variable (`1`, `true`, or `yes`).
+- Set `verbose = true` in `.treefort/config.toml` for a single repository or in `~/.treefort/config.toml` for all repositories.
+
+Verbosity is additive across sources. If any of these sources enables verbose mode, verbose output is active.
 
 ---
 
