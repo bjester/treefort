@@ -113,7 +113,13 @@ class Context:
                     fallback_dir = cwd_path
                 os.chdir(fallback_dir)
                 self.cwd = fallback_dir
-                self.request_cd(fallback_dir)
+                if self.shell_integration_active and not self.request_cd(fallback_dir):
+                    logger.warning(f'Shell was not moved; run: cd "{fallback_dir}"')
+
+    @property
+    def shell_integration_active(self) -> bool:
+        """Whether the shell wrapper installed by ``treefort shell-init`` is driving this run."""
+        return bool(os.environ.get(CD_FILE_ENV_VAR))
 
     def request_cd(self, target_dir: Path) -> bool:
         """Request that the parent shell change into the given directory.
@@ -124,7 +130,8 @@ class Context:
         directive file is the only channel to move the user's shell.
 
         :param target_dir: The directory the shell should change into
-        :return: True when shell integration is active, False when it is not
+        :return: True when the directive was written, False when shell integration is
+            inactive or the write failed
         """
         cd_file = os.environ.get(CD_FILE_ENV_VAR)
         if not cd_file:
@@ -133,6 +140,7 @@ class Context:
             Path(cd_file).write_text(f"{target_dir.resolve()}\n", encoding="utf-8")
         except OSError as e:
             logger.warning(f"Could not write directory change to {cd_file}: {e}")
+            return False
         return True
 
     def current_worktree_name(self) -> str | None:

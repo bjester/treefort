@@ -23,8 +23,9 @@ class SwitchCommand(Command):
         worktree, `^` for the worktree on the default branch (or the project root), and `@` or
         `.` for the root of the current worktree (or the project root).
 
-        When shell integration is active, the parent shell changes into the target directory;
-        otherwise the target path is printed so it can be used with `cd`.
+        When the shell wrapper installed by `treefort shell-init` is active and the directive
+        can be written, it changes into the target directory; otherwise the target path is
+        printed so it can be used with `cd`.
 
         Examples:
             treefort switch feature-a
@@ -65,10 +66,14 @@ class SwitchCommand(Command):
         else:
             # Keep stdout limited to the path so `cd "$(treefort switch ...)"` keeps working.
             print(str(target_path))
-            print(
-                ui.dim("For automatic directory switching, run `treefort shell-init`.", sys.stderr),
-                file=sys.stderr,
-            )
+            if not self._context.shell_integration_active:
+                print(
+                    ui.dim(
+                        "For automatic directory switching, run `treefort shell-init`.",
+                        sys.stderr,
+                    ),
+                    file=sys.stderr,
+                )
 
     def _resolve_target(
         self,

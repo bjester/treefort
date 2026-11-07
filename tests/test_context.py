@@ -78,14 +78,14 @@ class ContextTestCase(TestCase):
         self.assertTrue(result)
         self.assertEqual(cd_file.read_text(encoding="utf-8"), f"{target_dir.resolve()}\n")
 
-    def test_request_cd__warns_and_continues_when_cd_file_unwritable(self):
+    def test_request_cd__warns_and_returns_false_when_cd_file_unwritable(self):
         cd_file = self.tmp_path / "missing-dir" / "cd-file"
 
         with patch.dict(os.environ, {"TREEFORT_CD_FILE": str(cd_file)}):
             with self.assertLogs("treefort.context", level="WARNING") as logs:
                 result = self.context.request_cd(self.tmp_path)
 
-        self.assertTrue(result)
+        self.assertFalse(result)
         self.assertFalse(cd_file.exists())
         self.assertTrue(any(str(cd_file) in message for message in logs.output))
 
@@ -167,7 +167,47 @@ class ContextTestCase(TestCase):
         os.chdir(old_cwd)
 
         with patch.dict(os.environ, {"TREEFORT_CD_FILE": str(cd_file)}):
-            with self.context.use(project_dir):
-                shutil.rmtree(old_cwd)
+            with self.assertNoLogs("treefort.context", level="WARNING"):
+                with self.context.use(project_dir):
+                    shutil.rmtree(old_cwd)
 
         self.assertEqual(cd_file.read_text(encoding="utf-8"), f"{project_dir.resolve()}\n")
+
+    def test_use__warns_when_cd_directive_write_fails(self):
+        project_dir = self.make_project()
+        old_cwd = project_dir / "feature-a"
+        cd_file = self.tmp_path / "missing-dir" / "cd-file"
+        self.context.cwd = old_cwd
+        os.chdir(old_cwd)
+
+        with patch.dict(os.environ, {"TREEFORT_CD_FILE": str(cd_file)}):
+            with self.assertLogs("treefort.context", level="WARNING") as logs:
+                with self.context.use(project_dir):
+                    shutil.rmtree(old_cwd)
+
+        # The shell cannot be moved, so tell the user where to go instead of leaving it in a
+        # deleted directory without a way out.
+        self.assertTrue(any(f'cd "{project_dir.resolve()}"' in message for message in logs.output))
+
+    def test_use__does_not_warn_about_cd_when_shell_integration_inactive(self):
+        project_dir = self.make_project()
+        old_cwd = project_dir / "feature-a"
+        self.context.cwd = old_cwd
+        os.chdir(old_cwd)
+
+        with patch.dict(os.environ):
+            os.environ.pop("TREEFORT_CD_FILE", None)
+            with self.assertNoLogs("treefort.context", level="WARNING"):
+                with self.context.use(project_dir):
+                    shutil.rmtree(old_cwd)
+
+    def test_shell_integration_active__reflects_cd_file_env_var(self):
+        with patch.dict(os.environ, {"TREEFORT_CD_FILE": str(self.tmp_path / "cd-file")}):
+            self.assertTrue(self.context.shell_integration_active)
+
+        with patch.dict(os.environ, {"TREEFORT_CD_FILE": ""}):
+            self.assertFalse(self.context.shell_integration_active)
+
+        with patch.dict(os.environ):
+            os.environ.pop("TREEFORT_CD_FILE", None)
+            self.assertFalse(self.context.shell_integration_active)

@@ -294,12 +294,32 @@ class SwitchCommandTestCase(TestCase):
         self.assertEqual(stdout.getvalue(), f"{self.project_dir / 'feature-a'}\n")
         self.assertIn("shell-init", stderr.getvalue())
 
+    def test_call__prints_target_path_when_cd_directive_write_fails(self):
+        self.git.list_worktrees.return_value = self.worktree_listing()
+        cd_file = self.tmp_path / "missing-dir" / "cd-file"
+        stdout, stderr = io.StringIO(), io.StringIO()
+
+        with patch.dict(os.environ, {"TREEFORT_CD_FILE": str(cd_file)}):
+            with self.assertLogs("treefort.context", level="WARNING") as logs:
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    self.command("feature-a")
+
+        # A write failure must not claim success: the shell stays put, so print the path. The
+        # shell-init hint would be wrong here, because integration is already active.
+        self.assertEqual(stdout.getvalue(), f"{self.project_dir / 'feature-a'}\n")
+        self.assertNotIn("shell-init", stderr.getvalue())
+        self.assertTrue(any(str(cd_file) in message for message in logs.output))
+        self.logger.info.assert_not_called()
+
     def test_call__logs_success_when_shell_integration_active(self):
         self.git.list_worktrees.return_value = self.worktree_listing()
+        stdout = io.StringIO()
 
         with patch("treefort.ui.is_color_enabled", return_value=False):
-            self.switch("feature-a")
+            with redirect_stdout(stdout):
+                self.switch("feature-a")
 
+        self.assertEqual(stdout.getvalue(), "")
         self.logger.info.assert_called_once_with(f"✓ Switched to {self.project_dir / 'feature-a'}")
 
     def test_call__skips_deleted_worktree_in_listing(self):
