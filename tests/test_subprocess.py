@@ -104,6 +104,35 @@ class SubprocessOperatorTestCase(TestCase):
         process_mock.kill.assert_called_once_with()
         process_mock.wait.assert_called_once_with()
 
+    @mock.patch("treefort.subprocess.subprocess.Popen")
+    def test_stream_exec__stream_info_logs_gutter_lines(self, mock_popen):
+        process_mock = MagicMock()
+        process_mock.stdout = ["line1\n", "\n", "line2\n"]
+        process_mock.returncode = 0
+        process_mock.pid = 123
+        process_mock.poll.return_value = 0
+        mock_popen.return_value = process_mock
+
+        with mock.patch("treefort.ui.is_color_enabled", return_value=False):
+            exit_code = self.operator.stream_exec(["do-something"], stream_info=True)
+
+        self.assertEqual(exit_code, 0)
+        self.child_logger.info.assert_has_calls([mock.call("  │ line1"), mock.call("  │ line2")])
+        self.assertEqual(self.child_logger.info.call_count, 2)
+
+    @mock.patch("treefort.subprocess.subprocess.Popen")
+    def test_stream_exec__stream_info_disabled_logs_no_info(self, mock_popen):
+        process_mock = MagicMock()
+        process_mock.stdout = ["line1\n"]
+        process_mock.returncode = 0
+        process_mock.pid = 123
+        process_mock.poll.return_value = 0
+        mock_popen.return_value = process_mock
+
+        self.operator.stream_exec(["do-something"])
+
+        self.child_logger.info.assert_not_called()
+
     @mock.patch("treefort.subprocess.subprocess.run")
     def test_run(self, mock_run):
         result_mock = Mock(spec=subprocess.CompletedProcess, stdout="line1\nline2", returncode=0)

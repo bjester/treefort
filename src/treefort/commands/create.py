@@ -1,3 +1,4 @@
+from treefort import ui
 from treefort.command import Command
 from treefort.hooks import Hook
 from treefort.utils import normalize_worktree_name
@@ -41,7 +42,11 @@ class CreateCommand(Command):
             git_remote = self._runtime.get_default_remote()
             git_remote_name = git_remote.name
 
-        self._runtime.git.fetch(git_remote_name)
+        with ui.spinner(
+            f"Fetching {git_remote_name}...",
+            enabled=not getattr(self._runtime, "verbose", False),
+        ):
+            self._runtime.git.fetch(git_remote_name)
 
         normalized_name = normalize_worktree_name(worktree_name)
 
@@ -61,4 +66,11 @@ class CreateCommand(Command):
                 f"{git_remote_name}/{base_ref}",
                 normalized_name,
                 bypass_allowlist=yes,
+            )
+
+            self._logger.info(
+                ui.success(
+                    f"Created worktree {ui.bold(worktree_name)} (from {ui.dim(base_ref)}) "
+                    f"at {ui.dim(str(self._context.project_dir / worktree_name))}"
+                )
             )

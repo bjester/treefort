@@ -4,6 +4,7 @@ from logging import Logger
 from pathlib import Path
 from string import Template
 
+from treefort import ui
 from treefort.context import Context
 from treefort.operator import ConfigOperator
 from treefort.utils import normalize_worktree_name
@@ -43,25 +44,32 @@ class Templates(ConfigOperator):
         self.replacement_map["WORKTREE_NAME_NORMALIZED"] = normalize_worktree_name(worktree_name)
         self.replacement_map["WORKTREE_DIR"] = str(worktree_dir)
 
+        copied_count = 0
         for templates_dir in self.iter_config_dirs():
             for path in templates_dir.rglob("*"):
                 relative_path = path.relative_to(templates_dir)
-                self._copy(worktree_dir, path, relative_path)
+                if self._copy(worktree_dir, path, relative_path):
+                    copied_count += 1
 
-    def _copy(self, worktree_dir: Path, absolute_path: Path, relative_path: Path):
+        if copied_count:
+            self.logger.info(ui.success(f"Copied {copied_count} template(s)"))
+
+    def _copy(self, worktree_dir: Path, absolute_path: Path, relative_path: Path) -> bool:
+        """Copy a single template into the worktree, returning whether a file was written."""
         dest_path = worktree_dir / relative_path
 
         if absolute_path.is_dir():
             dest_path.mkdir(parents=True, exist_ok=True)
-            return
+            return False
 
-        self.logger.info(f"Copying template {relative_path}")
+        self.logger.debug(f"Copying template {relative_path}")
         with absolute_path.open("r", encoding="utf-8") as src:
             with dest_path.open("w", encoding="utf-8") as dest:
                 content = src.read()
                 dest.write(Template(content).safe_substitute(self.replacement_map))
 
         dest_path.chmod(absolute_path.stat().st_mode)
+        return True
 
     @contextmanager
     def add(self, relative_path: str):

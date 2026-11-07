@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -238,6 +239,49 @@ class TemplatesTestCase(unittest.TestCase):
         templates.copy("my-worktree")
 
         self.assertTrue((worktree_dir / "subdir").is_dir())
+
+    def test_copy__logs_per_file_copies_at_debug(self):
+        """Test that per-file copy messages are demoted to DEBUG."""
+        context = self._create_context()
+        templates = Templates(context, Mock())
+
+        worktree_dir = self.project_dir / "my-worktree"
+        worktree_dir.mkdir(parents=True)
+
+        templates.copy("my-worktree")
+
+        debug_messages = [call.args[0] for call in templates.logger.debug.call_args_list]
+        self.assertIn("Copying template config.txt", debug_messages)
+
+        info_messages = [call.args[0] for call in templates.logger.info.call_args_list]
+        self.assertFalse(any(message.startswith("Copying template") for message in info_messages))
+
+    def test_copy__logs_summary_of_copied_templates(self):
+        """Test that a single copy summary is logged at INFO."""
+        context = self._create_context()
+        templates = Templates(context, Mock())
+
+        worktree_dir = self.project_dir / "my-worktree"
+        worktree_dir.mkdir(parents=True)
+
+        with patch("treefort.ui.is_color_enabled", return_value=False):
+            templates.copy("my-worktree")
+
+        templates.logger.info.assert_called_once_with("✓ Copied 3 template(s)")
+
+    def test_copy__logs_no_summary_without_templates(self):
+        """Test that no summary is logged when there are no templates to copy."""
+        context = self._create_context()
+        templates = Templates(context, Mock())
+
+        worktree_dir = self.project_dir / "my-worktree"
+        worktree_dir.mkdir(parents=True)
+        shutil.rmtree(self.global_templates_dir)
+        shutil.rmtree(self.project_templates_dir)
+
+        templates.copy("my-worktree")
+
+        templates.logger.info.assert_not_called()
 
     def test_add__creates_file(self):
         context = self._create_context()

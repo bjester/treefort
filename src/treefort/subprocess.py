@@ -12,6 +12,7 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from typing import Any
 
+from treefort import ui
 from treefort.operator import RuntimeOperator
 
 # These are the allowed colors for command output, to avoid conflict with red/yellow errors/warnings
@@ -108,11 +109,18 @@ class SubprocessOperator(RuntimeOperator):
             return logging.getLogger(self.command_name).getChild(_log_name(command))
         return logging.getLogger(_log_name(command))
 
-    def stream_exec(self, command: list[str], cwd: str | Path | None = None) -> int:
+    def stream_exec(
+        self,
+        command: list[str],
+        cwd: str | Path | None = None,
+        stream_info: bool = False,
+    ) -> int:
         """
         Executes a command in a subprocess and streams its output to stdout.
         :param command: The command to execute as a list of strings
         :param cwd: The working directory to execute the command in
+        :param stream_info: Whether to mirror output lines to the console at INFO level, indented
+            in a gutter so they read as details beneath a step line
         :return: The exit code of the process
         """
         logger = self._get_command_logger(command)
@@ -154,11 +162,13 @@ class SubprocessOperator(RuntimeOperator):
                         break
                     continue
 
-                self._record_output_line(line)
+                stripped = self._record_output_line(line)
                 logger.debug(
-                    line.rstrip(),
+                    stripped,
                     extra={"color": color},
                 )
+                if stream_info and stripped:
+                    self.logger.info(ui.gutter(stripped))
 
             process.wait()
         except subprocess.TimeoutExpired:

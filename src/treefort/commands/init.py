@@ -1,5 +1,6 @@
 import re
 
+from treefort import ui
 from treefort.command import Command
 from treefort.config import RepositoryConfig, TomlConfigIO
 from treefort.errors import ProjectExistsError, RepositoryPathError
@@ -101,15 +102,22 @@ class InitCommand(Command):
                 skip_project=True,
                 bypass_allowlist=yes,
             )
-            self._runtime.git.clone(repo_target.uri, ".bare")
+            with ui.spinner(
+                f"Cloning {repo_target.uri}...",
+                enabled=not getattr(self._runtime, "verbose", False),
+            ):
+                self._runtime.git.clone(repo_target.uri, ".bare")
 
-            with (project_dir / ".git").open("w", encoding="utf-8") as f:
-                f.write("gitdir: ./.bare")
+                with (project_dir / ".git").open("w", encoding="utf-8") as f:
+                    f.write("gitdir: ./.bare")
 
-            self._context.reset_properties()
-            self._runtime.git.config("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
-            self._runtime.git.fetch()
-            repo_data = self._runtime.gh.repo_status()
+                self._context.reset_properties()
+                self._runtime.git.config(
+                    "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"
+                )
+                self._runtime.git.fetch()
+                repo_data = self._runtime.gh.repo_status()
+
             config = RepositoryConfig(TomlConfigIO.from_path(self._context.config_dir, "config"))
             config.update(
                 default_branch=repo_data["defaultBranchRef"]["name"],
@@ -129,6 +137,10 @@ class InitCommand(Command):
                 repo_target.uri,
                 project_dir,
                 bypass_allowlist=yes,
+            )
+
+            self._logger.info(
+                ui.success(f"Initialized {ui.bold(config.name)} in {ui.dim(str(project_dir))}")
             )
 
     def _add_hooks(self, config):

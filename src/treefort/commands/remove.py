@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from treefort import ui
 from treefort.command import Command
 from treefort.errors import CommandError, WorktreeNotFoundError
 from treefort.hooks import Hook
@@ -57,6 +58,7 @@ class RemoveCommand(Command):
                 branch_name = self._resolve_branch_name(worktree_path)
 
             self._runtime.git.remove_worktree(worktree_name, force=force)
+            self._logger.info(ui.success(f"Removed worktree {ui.bold(worktree_name)}"))
 
             if delete_branch:
                 if branch_name is None:
@@ -69,6 +71,8 @@ class RemoveCommand(Command):
                         self._runtime.git.delete_branch(branch_name, force=force)
                     except CommandError as e:
                         self._logger.warning(f"Failed to delete branch '{branch_name}': {e}")
+                    else:
+                        self._logger.info(ui.success(f"Deleted branch {ui.bold(branch_name)}"))
 
             self._runtime.hooks.fire(
                 Hook.post_remove, worktree_name, normalized_name, bypass_allowlist=yes

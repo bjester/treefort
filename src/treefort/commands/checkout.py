@@ -1,6 +1,7 @@
 import re
 from functools import cached_property
 
+from treefort import ui
 from treefort.command import Command
 from treefort.errors import BranchInputError, CommandError, RemoteNotFoundError, RemoteUsageError
 from treefort.git import GitUri
@@ -117,15 +118,26 @@ class CheckoutCommand(Command):
         inpt = CheckoutInput(self._runtime, str(branch_or_pr), remote_name=remote)
         inpt.validate()
 
-        if inpt.pr_number:
-            self._runtime.git.fetch(inpt.remote, f"pull/{inpt.pr_number}/head:{inpt.worktree_name}")
-        else:
-            # TODO: is this good to detect if it's local only?
-            try:
-                self._runtime.git.fetch(inpt.remote, f"{inpt.worktree_name}:{inpt.worktree_name}")
-            except (CommandError, OSError):
-                self._logger.warning("Ignoring git fetch error, attempting to open worktree")
-                pass
+        fetch_error = False
+        with ui.spinner(
+            f"Fetching {inpt.branch_or_pr}...",
+            enabled=not getattr(self._runtime, "verbose", False),
+        ):
+            if inpt.pr_number:
+                self._runtime.git.fetch(
+                    inpt.remote, f"pull/{inpt.pr_number}/head:{inpt.worktree_name}"
+                )
+            else:
+                # TODO: is this good to detect if it's local only?
+                try:
+                    self._runtime.git.fetch(
+                        inpt.remote, f"{inpt.worktree_name}:{inpt.worktree_name}"
+                    )
+                except (CommandError, OSError):
+                    fetch_error = True
+
+        if fetch_error:
+            self._logger.warning("Ignoring git fetch error, attempting to open worktree")
 
         normalized_name = normalize_worktree_name(inpt.worktree_name)
 
@@ -145,4 +157,11 @@ class CheckoutCommand(Command):
                 f"{inpt.remote}/{inpt.worktree_name}",
                 normalized_name,
                 bypass_allowlist=yes,
+            )
+
+            self._logger.info(
+                ui.success(
+                    f"Checked out worktree {ui.bold(inpt.worktree_name)} "
+                    f"at {ui.dim(str(self._context.project_dir / inpt.worktree_name))}"
+                )
             )
