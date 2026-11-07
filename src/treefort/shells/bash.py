@@ -5,7 +5,7 @@ Zsh reuses this module's output through ``bashcompinit``; see ``treefort.shells.
 
 from fire import completion as fire_completion
 
-from treefort.shells.fire_template import DEFAULT_OPTIONS
+from treefort.shells.fire_template import DEFAULT_OPTIONS, replace_required
 
 # The command name is templated into the shell snippets as __CMD__ so the snippets can
 # stay literal shell text, without brace escaping.
@@ -201,21 +201,22 @@ def completion_script(cmd: str, commands: list[tuple[str, ...]], hook_names: str
     # the shared frozenset.
     script = fire_completion._BashScript(cmd, commands, set(DEFAULT_OPTIONS))
     for helper in FIRE_BASH_HELPERS:
-        script = script.replace(helper, f"_treefort_{helper}")
+        script = replace_required(script, helper, f"_treefort_{helper}")
 
     # The helper is called from inside the completion function, far above the override
     # appended at the end of the script; point readers at the redefinition.
     call_site = "  lastcommand=$(_treefort_get_lastcommand)"
-    script = script.replace(
+    script = replace_required(
+        script,
         call_site,
         "  # Redefined at the end of this script; see BASH_HELPER_OVERRIDES.\n" + call_site,
         1,
     )
 
     dynamic_helpers = BASH_DYNAMIC_HELPERS.replace("__HOOK_NAMES__", hook_names)
-    script = script.replace(FIRE_BASH_HEADER, f"{FIRE_BASH_HEADER}\n{dynamic_helpers}", 1)
+    script = replace_required(script, FIRE_BASH_HEADER, f"{FIRE_BASH_HEADER}\n{dynamic_helpers}", 1)
 
     dynamic_dispatch = "  if _treefort_dynamic_completion; then\n    return 0\n  fi\n"
     patched = f"{dynamic_dispatch}{FIRE_BASH_COMPLETION_LINE}"
-    script = script.replace(FIRE_BASH_COMPLETION_LINE, patched, 1)
+    script = replace_required(script, FIRE_BASH_COMPLETION_LINE, patched, 1)
     return f"{script}\n{BASH_HELPER_OVERRIDES}"

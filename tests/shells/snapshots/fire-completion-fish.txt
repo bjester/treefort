@@ -1,0 +1,53 @@
+function __fish_using_command
+    set cmd (commandline -opc)
+    for i in (seq (count $cmd) 1)
+        switch $cmd[$i]
+        case "-*"
+        case "*"
+            if [ $cmd[$i] = $argv[1] ]
+                return 0
+            else
+                return 1
+            end
+        end
+    end
+    return 1
+end
+
+function __option_entered_check
+    set cmd (commandline -opc)
+    for i in (seq (count $cmd))
+        switch $cmd[$i]
+        case "-*"
+            if [ $cmd[$i] = $argv[1] ]
+                return 1
+            end
+        end
+    end
+    return 0
+end
+
+function __is_prev_global
+    set cmd (commandline -opc)
+    set global_options "--verbose" "-v"
+    set prev (count $cmd)
+
+    for opt in $global_options
+        if [ "--$opt" = $cmd[$prev] ]
+            echo $prev
+            return 0
+        end
+    end
+    return 1
+end
+
+complete -c demo -n '__fish_using_command checkout; and __is_prev_global; and __option_entered_check --remote' -l remote
+complete -c demo -n '__fish_using_command checkout; and __is_prev_global; and __option_entered_check --v' -l v
+complete -c demo -n '__fish_using_command checkout; and __is_prev_global; and __option_entered_check --verbose' -l verbose
+complete -c demo -n '__fish_using_command checkout; and __is_prev_global; and __option_entered_check --yes' -l yes
+complete -c demo -n '__fish_using_command demo' -f -a checkout
+complete -c demo -n '__fish_using_command demo' -f -a demo
+complete -c demo -n '__fish_using_command demo' -f -a sw
+complete -c demo -n '__fish_using_command demo' -f -a switch
+complete -c demo -n '__fish_using_command demo; and __option_entered_check --v' -l v
+complete -c demo -n '__fish_using_command demo; and __option_entered_check --verbose' -l verbose

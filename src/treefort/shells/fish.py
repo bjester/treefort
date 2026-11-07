@@ -1,10 +1,12 @@
 """Fish shell integration: the directory-changing wrapper and patched fire tab completion."""
 
-import re
-
 from fire import completion as fire_completion
 
-from treefort.shells.fire_template import DEFAULT_OPTIONS
+from treefort.shells.fire_template import (
+    DEFAULT_OPTIONS,
+    replace_required,
+    replace_required_regex,
+)
 
 FISH_WRAPPER = """\
 function __CMD__
@@ -151,17 +153,11 @@ def completion_script(cmd: str, commands: list[tuple[str, ...]], hook_names: str
         # Fire renders the short -v option as the long --v flag; register it as short.
         (" --v' -l v\n", " -v' -s v\n"),
     ):
-        script = script.replace(old, new)
+        script = replace_required(script, old, new)
 
     # Fire's global-flag helper is unreferenced once the guard is stripped above; drop
     # the dead definition instead of shipping its never-matching comparison.
-    script = re.sub(
-        r"function __treefort_is_prev_global\n.*?\nend\n\n",
-        "",
-        script,
-        count=1,
-        flags=re.DOTALL,
-    )
+    script = replace_required_regex(script, r"function __treefort_is_prev_global\n.*?\nend\n\n", "")
 
     rules = FISH_DYNAMIC_RULES.replace("__CMD__", cmd).replace("__HOOK_NAMES__", hook_names)
     return f"{script}{FISH_HELPERS}\n{rules}"

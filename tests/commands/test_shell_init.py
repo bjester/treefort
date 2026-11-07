@@ -10,7 +10,7 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from treefort.commands.shell_init import ShellInitCommand
-from treefort.errors import ValidationError
+from treefort.errors import CompletionTemplateError, ValidationError
 from treefort.main import WorktreeCommands
 
 # Bash function definitions the generated completion script may contain; anything else
@@ -149,6 +149,27 @@ class ShellInitCommandTestCase(TestCase):
         # alias only joins the subcommand suggestions of the main command
         self.assertIn("rm)", output)
         self.assertIn(" sw ", output)
+
+    def test_call__emits_nothing_when_fire_bash_template_changes(self):
+        # A fire release that rewords its template must fail loudly at profile load instead of
+        # silently shipping a script without the dynamic completion patch. Nothing may reach
+        # stdout, or `eval "$(...)"` would install a wrapper that never gets completion.
+        stdout = StringIO()
+        with patch("treefort.shells.bash.fire_completion._BashScript", return_value="unexpected"):
+            with self.assertRaisesRegex(CompletionTemplateError, "fire completion template"):
+                with redirect_stdout(stdout):
+                    self.command("bash")
+
+        self.assertEqual(stdout.getvalue(), "")
+
+    def test_call__emits_nothing_when_fire_fish_template_changes(self):
+        stdout = StringIO()
+        with patch("treefort.shells.fish.fire_completion._FishScript", return_value="unexpected"):
+            with self.assertRaisesRegex(CompletionTemplateError, "fire completion template"):
+                with redirect_stdout(stdout):
+                    self.command("fish")
+
+        self.assertEqual(stdout.getvalue(), "")
 
     def test_call__overrides_fire_completion_helpers(self):
         output = self.run_command("bash")

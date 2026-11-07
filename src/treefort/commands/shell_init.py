@@ -46,14 +46,21 @@ class ShellInitCommand(Command):
         :param shell: The shell to generate integration for: bash, zsh, or fish
         :param cmd: The command name the wrapper and completion register for
         :raises ValidationError: When `shell` or `cmd` is not supported
+        :raises CompletionTemplateError: When fire's completion template no longer matches
+            what the generated script patches
         """
         if shell not in SHELLS:
             raise ValidationError(f"Unsupported shell: {shell}. Choose one of: {', '.join(SHELLS)}")
         if not re.fullmatch(CMD_NAME_PATTERN, cmd):
             raise ValidationError(f"Invalid command name: {cmd}")
 
-        print(self._wrapper(shell, cmd))
-        print(self._completion_script(shell, cmd))
+        # Build both before printing anything: a template mismatch must not leave a wrapper
+        # installed with no completion behind it.
+        wrapper = self._wrapper(shell, cmd)
+        completion = self._completion_script(shell, cmd)
+
+        print(wrapper)
+        print(completion)
 
     def _wrapper(self, shell: str, cmd: str) -> str:
         """The wrapper function that performs requested directory changes in the shell."""

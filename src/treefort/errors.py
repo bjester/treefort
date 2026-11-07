@@ -115,3 +115,10 @@ class CommandError(WorktreeError):
     """Raised when a git or shell command fails"""
 
     pass
+
+
+# Completion template errors - upstream template drift
+class CompletionTemplateError(WorktreeError):
+    """Raised when fire's completion template no longer matches what shell-init patches"""
+
+    pass
