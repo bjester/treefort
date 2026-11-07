@@ -249,7 +249,7 @@ def _append_tree_lines(lines: list[str], children: list[tuple[str, list]], prefi
         is_last = index == last_index
         connector = TREE_LAST if is_last else TREE_MIDDLE
         lines.append(f"{prefix}{dim(connector)}{label}")
-        extension = TREE_BLANK if is_last else TREE_VERTICAL
+        extension = TREE_BLANK if is_last else dim(TREE_VERTICAL)
         _append_tree_lines(lines, grandchildren or [], prefix + extension)
 
 
