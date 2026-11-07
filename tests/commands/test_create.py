@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from treefort.commands.create import CreateCommand
 from treefort.git import GitRemote
@@ -136,6 +136,38 @@ class CreateCommandTestCase(TestCase):
             "feature",
             bypass_allowlist=False,
         )
+
+    def test_call__logs_completion_milestone(self):
+        with patch("treefort.ui.is_color_enabled", return_value=False):
+            self.command("feature")
+
+        self.runtime.logger.info.assert_called_once_with(
+            "✓ Created worktree feature (from main) at /repo/feature"
+        )
+
+    def test_call__spins_while_fetching(self):
+        with patch("treefort.commands.create.ui.spinner") as spinner:
+            self.command("feature")
+
+        spinner.assert_called_once_with("Fetching upstream...", enabled=True)
+
+    def test_call__disables_spinner_when_verbose(self):
+        self.runtime.verbose = True
+
+        with patch("treefort.commands.create.ui.spinner") as spinner:
+            self.command("feature")
+
+        spinner.assert_called_once_with("Fetching upstream...", enabled=False)
+
+    def test_call__runs_hooks_outside_spinner(self):
+        events = []
+        self.hooks.fire.side_effect = lambda hook, *args, **kwargs: events.append(hook.name)
+
+        with patch("treefort.commands.create.ui.spinner") as spinner:
+            spinner.return_value.__exit__.side_effect = lambda *args: events.append("exit")
+            self.command("feature")
+
+        self.assertEqual(events, ["exit", "pre_create", "post_create"])
 
     def test_call__yes_true_sets_bypass_allowlist_true(self):
         self.command("feature", yes=True)

@@ -1,39 +1,23 @@
 """Logging utility for treefort CLI."""
 
 import logging
-import os
-import re
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any
 
-# ANSI color codes
-COLORS = {
-    "red": "\033[91m",
-    "green": "\033[92m",
-    "yellow": "\033[93m",
-    "blue": "\033[94m",
-    "magenta": "\033[95m",
-    "cyan": "\033[96m",
-    "reset": "\033[0m",
-}
-ANSI_ESCAPE_RE = re.compile(r"\033\]8;[^;\033\007]*;.*?(?:\033\\|\007)|\033\[[0-9;]*[a-zA-Z]")
+from treefort import ui
+
+# ANSI color codes, sourced from the terminal UI palette so there is a single definition
+COLORS = {**ui.COLORS, "reset": ui.RESET}
 MAX_LOG_SIZE = 10 * 1024 * 1024
 LOG_BACKUP = 5
-
-
-def _should_use_color(stream: Any) -> bool:
-    if os.environ.get("NO_COLOR"):
-        return False
-    return bool(hasattr(stream, "isatty") and stream.isatty())
 
 
 class PlainFileFormatter(logging.Formatter):
     """Formatter that strips ANSI SGR and OSC 8 escape sequences for file logs."""
 
     def format(self, record: logging.LogRecord) -> str:
-        return ANSI_ESCAPE_RE.sub("", super().format(record))
+        return ui.strip_ansi(super().format(record))
 
 
 class ColorFormatter(logging.Formatter):
@@ -71,7 +55,7 @@ class ColorFormatter(logging.Formatter):
         prefix = self.LEVEL_PREFIXES.get(record.levelno, "")
         message = f"{prefix}{message}"
         if not self.use_color:
-            return ANSI_ESCAPE_RE.sub("", message)
+            return ui.strip_ansi(message)
         if color_code:
             return f"{color_code}{message}{COLORS['reset']}"
         return message
@@ -99,12 +83,12 @@ def setup_logger(
     console_fmt = "%(message)s"
     stdout_formatter = ColorFormatter(
         console_fmt,
-        use_color=_should_use_color(sys.stdout),
+        use_color=ui.is_color_enabled(sys.stdout),
         base_logger_name=name,
     )
     stderr_formatter = ColorFormatter(
         console_fmt,
-        use_color=_should_use_color(sys.stderr),
+        use_color=ui.is_color_enabled(sys.stderr),
         base_logger_name=name,
     )
 

@@ -6,6 +6,7 @@ from enum import Enum
 from logging import Logger
 from pathlib import Path
 
+from treefort import ui
 from treefort.context import Context
 from treefort.errors import HookError, HookExistsError
 from treefort.operator import ConfigOperator
@@ -78,7 +79,10 @@ class Hooks(ConfigOperator, SubprocessOperator):
                 continue
 
             fired = True
-            return_status = self.stream_exec([hook_file_str, *[str(arg) for arg in args]])
+            self.logger.info(ui.step(f"Running hook {ui.bold(hook.name)}"))
+            return_status = self.stream_exec(
+                [hook_file_str, *[str(arg) for arg in args]], stream_info=True
+            )
             if return_status != 0:
                 tail = self._format_output_tail()
                 detail = f":{tail}" if tail else ""

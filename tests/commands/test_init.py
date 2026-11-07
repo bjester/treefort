@@ -3,7 +3,7 @@ import tempfile
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
 
 from treefort.commands.init import InitCommand, RepositoryTarget, normalize
 from treefort.errors import RepositoryPathError
@@ -236,6 +236,47 @@ class InitCommandTestCase(TestCase):
 
         self.runtime.templates.add.assert_called_once_with(".treefort/templates/example.txt")
         self.git.cat_file.assert_not_called()
+
+    def test_call__logs_completion_milestone(self):
+        command = InitCommand(self.runtime)
+
+        with patch("treefort.ui.is_color_enabled", return_value=False):
+            command("octo/repo", str(self.project_dir))
+
+        self.runtime.logger.info.assert_called_once_with(
+            f"✓ Initialized repo in {self.tmp_path / self.project_dir}"
+        )
+
+    def test_call__spins_while_cloning(self):
+        command = InitCommand(self.runtime)
+
+        with patch("treefort.commands.init.ui.spinner") as spinner:
+            command("octo/repo", str(self.project_dir))
+
+        spinner.assert_called_once_with("Cloning https://github.com/octo/repo.git...", enabled=True)
+
+    def test_call__disables_spinner_when_verbose(self):
+        self.runtime.verbose = True
+        command = InitCommand(self.runtime)
+
+        with patch("treefort.commands.init.ui.spinner") as spinner:
+            command("octo/repo", str(self.project_dir))
+
+        spinner.assert_called_once_with(
+            "Cloning https://github.com/octo/repo.git...", enabled=False
+        )
+
+    def test_call__runs_hooks_outside_spinner(self):
+        events = []
+        self.hooks.fire.side_effect = lambda hook, *args, **kwargs: events.append(hook.name)
+        command = InitCommand(self.runtime)
+
+        with patch("treefort.commands.init.ui.spinner") as spinner:
+            spinner.return_value.__enter__.side_effect = lambda *args: events.append("enter")
+            spinner.return_value.__exit__.side_effect = lambda *args: events.append("exit")
+            command("octo/repo", str(self.project_dir))
+
+        self.assertEqual(events, ["pre_init", "enter", "exit", "post_init"])
 
     def test_call__yes_true_sets_bypass_allowlist_true(self):
         command = InitCommand(self.runtime)

@@ -76,7 +76,25 @@ class HooksTestCase(TestCase):
         mock_stream_exec.return_value = 0
 
         self.assertTrue(self.hooks.fire(Hook.pre_init, "arg1"))
-        mock_stream_exec.assert_called_once_with([str(hook_file), "arg1"])
+        mock_stream_exec.assert_called_once_with([str(hook_file), "arg1"], stream_info=True)
+
+    @mock.patch.object(Hooks, "stream_exec")
+    @mock.patch.object(Hooks, "_check_allowed")
+    def test_fire__logs_step_header_before_streaming(self, mock_check_allowed, mock_stream_exec):
+        hook_file = self.hooks_path / Hook.pre_init.name
+        hook_file.write_bytes(b"echo ok")
+        hook_file.chmod(hook_file.stat().st_mode | stat.S_IEXEC)
+
+        events = []
+        mock_check_allowed.return_value = True
+        mock_stream_exec.side_effect = lambda *args, **kwargs: events.append("stream") or 0
+        self.hooks.logger.info.side_effect = lambda *args, **kwargs: events.append("header")
+
+        with mock.patch("treefort.ui.is_color_enabled", return_value=False):
+            self.hooks.fire(Hook.pre_init)
+
+        self.assertEqual(events, ["header", "stream"])
+        self.hooks.logger.info.assert_called_once_with("◎ Running hook pre_init")
 
     @mock.patch.object(Hooks, "stream_exec")
     @mock.patch.object(Hooks, "_check_allowed")
@@ -123,6 +141,7 @@ class HooksTestCase(TestCase):
 
         self.assertFalse(self.hooks.fire(Hook.pre_init, "arg1"))
         mock_stream_exec.assert_not_called()
+        self.hooks.logger.info.assert_not_called()
 
     def test_add(self):
         with self.hooks.add(Hook.pre_init) as f:

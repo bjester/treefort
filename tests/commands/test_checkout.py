@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import ANY, Mock
+from unittest.mock import ANY, Mock, patch
 
 from treefort.commands.checkout import CheckoutCommand, CheckoutInput
 from treefort.errors import BranchInputError, CommandError, RemoteNotFoundError
@@ -182,6 +182,16 @@ class CheckoutCommandTestCase(TestCase):
         with self.assertRaises(BranchInputError, msg="Couldn't parse input. Must be"):
             self.command("https://github.com/octo/repo/issues/12")
 
+    def test_call__runs_hooks_outside_spinner(self):
+        events = []
+        self.hooks.fire.side_effect = lambda hook, *args, **kwargs: events.append(hook.name)
+
+        with patch("treefort.commands.checkout.ui.spinner") as spinner:
+            spinner.return_value.__exit__.side_effect = lambda *args: events.append("exit")
+            self.command("feature")
+
+        self.assertEqual(events, ["exit", "pre_checkout", "post_checkout"])
+
     def test_call__yes_true_sets_bypass_allowlist_true(self):
         self.gh.pr_status.return_value = {
             "headRefName": "feature",
@@ -202,3 +212,63 @@ class CheckoutCommandTestCase(TestCase):
         self.command("feature")
 
         self.git.open_worktree.assert_called_once_with("feature")
+        self.runtime.logger.warning.assert_called_once_with(
+            "Ignoring git fetch error, attempting to open worktree"
+        )
+
+    def test_call__logs_fetch_failure_at_debug(self):
+        self.git.fetch.side_effect = CommandError("fetch failed")
+
+        self.command("feature")
+
+        self.runtime.logger.debug.assert_called_once_with("Ignoring fetch failure: fetch failed")
+
+    def test_call__warns_outside_spinner_when_fetch_fails(self):
+        events = []
+        self.git.fetch.side_effect = CommandError("fetch failed")
+        self.runtime.logger.warning.side_effect = lambda *args, **kwargs: events.append("warning")
+
+        with patch("treefort.commands.checkout.ui.spinner") as spinner:
+            spinner.return_value.__exit__.side_effect = lambda *args: events.append("exit")
+            self.command("feature")
+
+        self.assertEqual(events, ["exit", "warning"])
+
+    def test_call__logs_completion_milestone(self):
+        with patch("treefort.ui.is_color_enabled", return_value=False):
+            self.command("feature")
+
+        self.runtime.logger.info.assert_called_once_with(
+            "✓ Checked out worktree feature at /repo/feature"
+        )
+
+    def test_call__spins_while_fetching(self):
+        with patch("treefort.commands.checkout.ui.spinner") as spinner:
+            self.command("feature")
+
+        spinner.assert_called_once_with("Fetching feature...", enabled=True)
+
+    def test_call__resolves_pr_inside_spinner(self):
+        events = []
+
+        def record_pr_status(*args, **kwargs):
+            events.append("pr_status")
+            return {"headRefName": "feature"}
+
+        self.gh.pr_status.side_effect = record_pr_status
+
+        with patch("treefort.commands.checkout.ui.spinner") as spinner:
+            spinner.return_value.__enter__.side_effect = lambda *args: events.append("enter")
+            spinner.return_value.__exit__.side_effect = lambda *args: events.append("exit")
+            self.command("1234")
+
+        self.assertEqual(events, ["enter", "pr_status", "exit"])
+        spinner.assert_called_once_with("Fetching 1234...", enabled=True)
+
+    def test_call__disables_spinner_when_verbose(self):
+        self.runtime.verbose = True
+
+        with patch("treefort.commands.checkout.ui.spinner") as spinner:
+            self.command("feature")
+
+        spinner.assert_called_once_with("Fetching feature...", enabled=False)

@@ -12,10 +12,13 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from typing import Any
 
+from treefort import ui
 from treefort.operator import RuntimeOperator
 
-# These are the allowed colors for command output, to avoid conflict with red/yellow errors/warnings
-ALLOWED_COLORS = ["green", "blue", "magenta", "cyan"]
+# Command traces are DEBUG-only and carry no level glyph, so a color never competes with the
+# semantic rendering of a warning (▲) or error (✗) on stderr. Any palette color is therefore
+# usable to tell one command's output apart from another's in verbose mode.
+COMMAND_COLORS = list(ui.COLORS)
 MAX_OUTPUT_TAIL = 20
 
 
@@ -74,7 +77,7 @@ class RandomColorDecorator(ContextDecorator):
     def __enter__(self):
         self._state.depth += 1
         if self._state.color is None:
-            self._state.color = random.choice(ALLOWED_COLORS)
+            self._state.color = random.choice(COMMAND_COLORS)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._state.depth -= 1
@@ -108,11 +111,18 @@ class SubprocessOperator(RuntimeOperator):
             return logging.getLogger(self.command_name).getChild(_log_name(command))
         return logging.getLogger(_log_name(command))
 
-    def stream_exec(self, command: list[str], cwd: str | Path | None = None) -> int:
+    def stream_exec(
+        self,
+        command: list[str],
+        cwd: str | Path | None = None,
+        stream_info: bool = False,
+    ) -> int:
         """
         Executes a command in a subprocess and streams its output to stdout.
         :param command: The command to execute as a list of strings
         :param cwd: The working directory to execute the command in
+        :param stream_info: Whether to mirror output lines to the console at INFO level, indented
+            in a gutter so they read as details beneath a step line
         :return: The exit code of the process
         """
         logger = self._get_command_logger(command)
@@ -133,7 +143,7 @@ class SubprocessOperator(RuntimeOperator):
         deadline = time.monotonic() + self.wait_time
 
         try:
-            color = ALLOWED_COLORS[process.pid % len(ALLOWED_COLORS)]
+            color = COMMAND_COLORS[process.pid % len(COMMAND_COLORS)]
             self.logger.debug(f"Executing: {shlex.join(command)}", extra={"color": color})
             logger.debug(f"START: {shlex.join(command)}", extra={"color": color})
 
@@ -154,11 +164,16 @@ class SubprocessOperator(RuntimeOperator):
                         break
                     continue
 
-                self._record_output_line(line)
-                logger.debug(
-                    line.rstrip(),
-                    extra={"color": color},
-                )
+                stripped = self._record_output_line(line)
+                # A line has exactly one destination: the console gutter when the caller wants
+                # live output, otherwise the colorized debug trace.
+                if not stream_info:
+                    logger.debug(
+                        stripped,
+                        extra={"color": color},
+                    )
+                elif stripped:
+                    self.logger.info(ui.gutter(stripped))
 
             process.wait()
         except subprocess.TimeoutExpired:

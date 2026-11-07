@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import Mock, call
+from unittest.mock import Mock, call, patch
 
 from treefort.commands.remove import RemoveCommand
 from treefort.errors import CommandError, WorktreeNotFoundError
@@ -169,6 +169,40 @@ class RemoveCommandTestCase(TestCase):
         self.hooks.fire.assert_any_call(
             Hook.post_remove, "custom-dir", "custom-dir", bypass_allowlist=False
         )
+
+    def test_call__logs_removal_milestone(self):
+        self.add_worktree("feature")
+
+        with patch("treefort.ui.is_color_enabled", return_value=False):
+            self.command("feature")
+
+        self.logger.info.assert_called_once_with("✓ Removed worktree feature")
+
+    def test_call__logs_branch_deletion_milestone(self):
+        self.add_worktree("feature")
+        self.git.list_worktrees.return_value = [
+            self.worktree_record("feature", "refs/heads/feature")
+        ]
+
+        with patch("treefort.ui.is_color_enabled", return_value=False):
+            self.command("feature", delete_branch=True)
+
+        self.assertEqual(
+            self.logger.info.call_args_list,
+            [call("✓ Removed worktree feature"), call("✓ Deleted branch feature")],
+        )
+
+    def test_call__logs_no_branch_milestone_when_deletion_fails(self):
+        self.add_worktree("feature")
+        self.git.list_worktrees.return_value = [
+            self.worktree_record("feature", "refs/heads/feature")
+        ]
+        self.git.delete_branch.side_effect = CommandError("boom")
+
+        with patch("treefort.ui.is_color_enabled", return_value=False):
+            self.command("feature", delete_branch=True)
+
+        self.assertEqual(self.logger.info.call_args_list, [call("✓ Removed worktree feature")])
 
     def test_call__yes_true_sets_bypass_allowlist_true(self):
         self.add_worktree("feature")
