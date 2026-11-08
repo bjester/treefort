@@ -11,7 +11,7 @@ from treefort.runtime import Runtime
 from treefort.utils import normalize_worktree_name
 
 URL_RE = re.compile(r"^https://github\.com/[a-z0-9-]+/[\w.-]+/pull/\d+$", re.IGNORECASE)
-BRANCH_RE = re.compile(r"^[\w.-/]+$", re.IGNORECASE)
+BRANCH_RE = re.compile(r"^(?!-)[\w./-]+$", re.IGNORECASE)
 
 
 class CheckoutInput:
