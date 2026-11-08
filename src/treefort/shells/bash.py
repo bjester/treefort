@@ -126,12 +126,13 @@ _treefort_complete() {{
 
 
 def _command_function(spec: CommandSpec) -> str:
+    # Each spelling is its own word so the helper can match it against a typed token
     value_flags = " ".join(value_flag_spellings(spec))
-    count_args = f'"{value_flags}"' if value_flags else ""
+    count_args = f" {value_flags}" if value_flags else ""
     return f"""\
 _treefort_complete_{_function_suffix(spec.name)}() {{
     local prev="$1" cur="$2" position
-    position=$(_treefort_positional_count "$3" {count_args})
+    position=$(_treefort_positional_count "$3"{count_args})
 {_command_body(spec)}
 }}"""
 
@@ -148,12 +149,17 @@ def _command_body(spec: CommandSpec) -> str:
 def _value_cases(spec: CommandSpec) -> str:
     cases = []
     for param in flag_params(spec):
-        source = candidate_source(param)
-        if source is None or param.value_type == "bool":
+        if param.value_type == "bool":
             continue
         spellings = [f"--{param.name.replace('_', '-')}"]
         if param.short is not None:
             spellings.append(param.short)
+        source = candidate_source(param)
+        if source is None:
+            # A value flag without candidates still ends completion, so the value is never
+            # offered the command's positional candidates
+            cases.append(f"        {'|'.join(spellings)})\n            return 0\n            ;;")
+            continue
         cases.append(
             f"        {'|'.join(spellings)})\n"
             f'            COMPREPLY=( $(compgen -W "{_word_expression(source)}" -- "$cur") )\n'

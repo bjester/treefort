@@ -1,8 +1,10 @@
 import os
+import shlex
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from unittest import TestCase
+from unittest import TestCase, skipUnless
 
 from treefort.cli_manifest import CommandSpec, ParamSpec
 from treefort.command import Completion
@@ -178,6 +180,7 @@ COMMANDS = {
     "sync": SYNC,
 }
 ALIAS_MAP = {"rm": "remove"}
+HOOK_WORDS = ["list", *(hook.name for hook in Hook)]
 
 
 class ShellsTestCase(TestCase):
@@ -257,6 +260,34 @@ class ShellsTestCase(TestCase):
         words = self.bash(["treefort", "checkout", "--remote", ""], 3, helper_override=stub)
 
         self.assertEqual(["origin", "upstream"], words)
+
+    def test_bash_completion_script__completes_a_positional_after_a_value_flag(self):
+        stub = "_treefort_branch_refs() { printf '%s\\n' main feature; }"
+
+        words = self.bash(
+            ["treefort", "checkout", "--remote", "origin", ""], 4, helper_override=stub
+        )
+
+        self.assertEqual(["main", "feature"], words)
+        # The count advances past the filled positional instead of staying at zero
+        self.assertEqual(
+            [],
+            self.bash(
+                ["treefort", "checkout", "--remote", "origin", "main", ""],
+                5,
+                helper_override=stub,
+            ),
+        )
+
+    def test_bash_completion_script__skips_the_argument_of_a_short_value_flag(self):
+        stub = "_treefort_branch_refs() { printf '%s\\n' main feature; }"
+
+        words = self.bash(["treefort", "checkout", "-r", "origin", ""], 4, helper_override=stub)
+
+        self.assertEqual(["main", "feature"], words)
+
+    def test_bash_completion_script__offers_nothing_for_a_value_flag_without_candidates(self):
+        self.assertEqual([], self.bash(["treefort", "shell-init", "--count", ""], 3))
 
     def test_bash_completion_script__offers_nothing_for_an_inline_value_without_candidates(self):
         self.assertEqual([], self.bash(["treefort", "shell-init", "--count=3"], 2))
@@ -351,10 +382,16 @@ class ShellsTestCase(TestCase):
             "-d 'Enable verbose debug logging'",
             script,
         )
+
+    def test_fish_completion_script__counts_only_positionals(self):
+        script = self.scripts["fish"]
+
+        self.assertIn("function __treefort_positional_count", script)
         self.assertIn(
-            "shell-init; and test (count (commandline -opc)) -eq 3' -a 'list pre_init",
+            "shell-init; and test (__treefort_positional_count --count) -eq 1' -a 'list pre_init",
             script,
         )
+        self.assertIn("remove rm; and test (__treefort_positional_count) -eq 0'", script)
 
     def test_fish_completion_script__registers_flags_for_every_alias(self):
         script = self.scripts["fish"]
@@ -408,6 +445,54 @@ class ShellsTestCase(TestCase):
 
     def test_fish_completion_script__disables_file_completion(self):
         self.assertIn("complete -c __CMD__ -f", self.scripts["fish"])
+
+
+class FishCompletionTestCase(TestCase):
+    """Runs the generated fish script, which needs a fish binary to observe."""
+
+    @skipUnless(shutil.which("fish"), "fish is not installed")
+    def test_fish_completion__offers_the_positional_after_a_value_flag(self):
+        script = fish_shell.completion_script(COMMANDS, ALIAS_MAP, "treefort")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "completions.fish"
+            path.write_text(script, encoding="utf-8")
+            self.assertEqual(
+                ["bash", "fish", "zsh"], self.complete(path, tmp, "treefort shell-init ")
+            )
+            self.assertEqual(
+                ["bash", "fish", "zsh"],
+                self.complete(path, tmp, "treefort shell-init --count 2 "),
+            )
+            self.assertEqual(
+                sorted(HOOK_WORDS), self.complete(path, tmp, "treefort shell-init bash ")
+            )
+            # The candidates come from git, so only their presence is stable here
+            self.assertNotEqual([], self.complete(path, tmp, "treefort checkout --remote origin "))
+            self.assertEqual(
+                [], self.complete(path, tmp, "treefort checkout --remote origin main ")
+            )
+
+    def complete(self, script: Path, home: str, line: str) -> list[str]:
+        """Return the candidates fish offers for a command line."""
+        environment = {
+            **os.environ,
+            "HOME": home,
+            "XDG_CONFIG_HOME": home,
+            "XDG_DATA_HOME": home,
+            "XDG_CACHE_HOME": home,
+        }
+        program = f"source {shlex.quote(str(script))}; complete -C {shlex.quote(line)}"
+        result = subprocess.run(
+            ["fish", "--no-config", "-c", program],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            env=environment,
+        )
+        self.assertEqual("", result.stderr, result.stderr)
+        return sorted(entry.split("\t")[0] for entry in result.stdout.splitlines())
 
 
 class WrapperTestCase(TestCase):
