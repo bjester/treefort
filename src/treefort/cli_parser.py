@@ -37,7 +37,9 @@ def parse_cli_args(manifest: CLIManifest, argv: Sequence[str]) -> ParsedInvocati
     :raises CLIUsageError: When the arguments or flags are invalid
     """
     pre_sep, passthrough = _split_passthrough(argv)
-    verbose, help_requested, tokens = _extract_global_flags(pre_sep)
+    help_requested = any(token in HELP_FLAGS for token in pre_sep)
+    verbose = any(token in VERBOSE_FLAGS for token in pre_sep)
+    tokens = _without_leading_verbose([token for token in pre_sep if token not in HELP_FLAGS])
 
     if not tokens:
         if passthrough:
@@ -45,7 +47,10 @@ def parse_cli_args(manifest: CLIManifest, argv: Sequence[str]) -> ParsedInvocati
         return ParsedInvocation(None, (), {}, verbose, True)
 
     if tokens[0] == "help":
-        return ParsedInvocation(_resolve_help_target(manifest, tokens[1:]), (), {}, verbose, True)
+        target = _resolve_help_target(
+            manifest, [token for token in tokens[1:] if token not in VERBOSE_FLAGS]
+        )
+        return ParsedInvocation(target, (), {}, verbose, True)
 
     if _is_flag_token(tokens[0]):
         raise CLIUsageError(f"Unknown flag: {tokens[0]}")
@@ -68,19 +73,16 @@ def _split_passthrough(argv: Sequence[str]) -> tuple[list[str], list[str]]:
     return tokens[:index], tokens[index + 1 :]
 
 
-def _extract_global_flags(tokens: Sequence[str]) -> tuple[bool, bool, list[str]]:
-    """Remove the global verbose and help flags from the tokens."""
-    verbose = False
-    help_requested = False
-    remaining = []
-    for token in tokens:
-        if token in VERBOSE_FLAGS:
-            verbose = True
-        elif token in HELP_FLAGS:
-            help_requested = True
-        else:
-            remaining.append(token)
-    return verbose, help_requested, remaining
+def _without_leading_verbose(tokens: Sequence[str]) -> list[str]:
+    """Remove the verbose flags that precede the command token.
+
+    Verbose flags after the command stay in place, so a value flag that is missing its value
+    sees the flag token and reports that, rather than binding the following argument.
+    """
+    remaining = list(tokens)
+    while remaining and remaining[0] in VERBOSE_FLAGS:
+        remaining.pop(0)
+    return remaining
 
 
 def _resolve_help_target(manifest: CLIManifest, tokens: Sequence[str]) -> str | None:
@@ -103,13 +105,19 @@ def _resolve_command_name(manifest: CLIManifest, token: str) -> str:
 def _bind_arguments(
     spec: CommandSpec, tokens: Sequence[str], passthrough: Sequence[str]
 ) -> tuple[tuple[object, ...], dict[str, object]]:
-    """Bind flag tokens to keyword arguments and the rest to positional arguments."""
+    """Bind flag tokens to keyword arguments and the rest to positional arguments.
+
+    Verbose flags before the separator are skipped, so they never take part in binding.
+    """
     lookup = _flag_lookup(spec)
     positionals: list[str] = []
     kwargs: dict[str, object] = {}
     index = 0
     while index < len(tokens):
         token = tokens[index]
+        if token in VERBOSE_FLAGS:
+            index += 1
+            continue
         if not _is_flag_token(token):
             positionals.append(token)
             index += 1

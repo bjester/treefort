@@ -249,6 +249,35 @@ class ParseCliArgsTestCase(TestCase):
         self.assertFalse(parsed.verbose)
         self.assertEqual(("feature", "-v"), parsed.args)
 
+    def test_raises_when_a_value_flag_is_followed_by_verbose(self):
+        # Removing the flag first would bind "extra" to --cmd and hide the missing value
+        with self.assertRaisesRegex(CLIUsageError, "Flag --cmd requires a value") as context:
+            self.parse("sample", "bash", "--cmd", "-v", "extra")
+
+        self.assertEqual("sample", context.exception.command_name)
+
+    def test_raises_for_a_short_value_flag_followed_by_verbose(self):
+        with self.assertRaisesRegex(CLIUsageError, "Flag --cmd requires a value"):
+            self.parse("sample", "bash", "-c", "-v", "extra")
+
+    def test_help_still_wins_over_a_missing_flag_value(self):
+        parsed = self.parse("sample", "--cmd", "-h")
+
+        self.assertTrue(parsed.help_requested)
+
+    def test_extracts_verbose_after_the_help_subcommand(self):
+        parsed = self.parse("help", "sample", "-v")
+
+        self.assertEqual("sample", parsed.command_name)
+        self.assertTrue(parsed.help_requested)
+        self.assertTrue(parsed.verbose)
+
+    def test_reports_verbose_when_help_is_requested(self):
+        parsed = self.parse("create", "-v", "-h")
+
+        self.assertTrue(parsed.help_requested)
+        self.assertTrue(parsed.verbose)
+
     # --- aliases and positionals ----------------------------------------------------------
 
     def test_resolves_an_alias_to_the_canonical_command(self):
