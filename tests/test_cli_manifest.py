@@ -20,6 +20,7 @@ from treefort.cli_manifest import (
     ManifestUnavailable,
     ParamSpec,
     _can_rebuild,
+    extract_synopsis,
     is_packaged,
     load_manifest,
     max_source_mtime_ns,
@@ -123,6 +124,31 @@ class MaxSourceMtimeNsTestCase(TestCase):
     def test_returns_zero_when_there_are_no_sources(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(0, max_source_mtime_ns(Path(tmp)))
+
+
+class ExtractSynopsisTestCase(TestCase):
+    def test_returns_the_synopsis_line(self):
+        help_text = (
+            "NAME\n"
+            "    treefort remove - Remove a worktree\n"
+            "\n"
+            "SYNOPSIS\n"
+            "    treefort remove WORKTREE_NAME <flags>\n"
+            "\n"
+            "FLAGS\n"
+            "    -f, --force\n"
+        )
+
+        self.assertEqual("treefort remove WORKTREE_NAME <flags>", extract_synopsis(help_text))
+
+    def test_returns_an_empty_string_without_a_synopsis(self):
+        self.assertEqual("", extract_synopsis("NAME\n    treefort remove\n"))
+
+    def test_returns_an_empty_string_when_the_section_has_no_body(self):
+        self.assertEqual("", extract_synopsis("NAME\n    treefort remove\n\nSYNOPSIS\n"))
+
+    def test_requires_the_heading_to_be_its_own_line(self):
+        self.assertEqual("", extract_synopsis("SYNOPSIS: treefort remove\n"))
 
 
 class IsPackagedTestCase(TestCase):

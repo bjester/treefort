@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 from treefort.cli import main
 from treefort.cli_manifest import ManifestUnavailable, load_manifest
+from treefort.cli_parser import ParsedInvocation
 
 
 class MainTestCase(TestCase):
@@ -40,6 +41,18 @@ class MainTestCase(TestCase):
 
         self.assertEqual("treefort: treefort is missing its generated CLI manifest", code)
         self.assertEqual("", stdout)
+
+    def test_main__prints_root_help_when_no_command_is_resolved(self):
+        parsed = ParsedInvocation(None, (), {}, False, False)
+        with (
+            patch("treefort.cli.parse_cli_args", return_value=parsed),
+            patch("treefort.cli.WorktreeCommands") as commands_mock,
+        ):
+            stdout, stderr = self.run_main([])
+
+        commands_mock.assert_not_called()
+        self.assertEqual(load_manifest().root_help_text, stdout)
+        self.assertEqual("", stderr)
 
     def test_main__prints_root_help_without_building_the_component(self):
         with patch("treefort.cli.WorktreeCommands") as commands_mock:

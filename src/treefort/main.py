@@ -1,5 +1,3 @@
-from functools import cached_property
-
 from treefort import __version__
 from treefort.command import Command
 from treefort.commands.checkout import CheckoutCommand
@@ -8,7 +6,6 @@ from treefort.commands.init import InitCommand
 from treefort.commands.install import InstallCommand
 from treefort.commands.prune import PruneCommand
 from treefort.commands.remove import RemoveCommand
-from treefort.errors import AliasConflictError
 from treefort.runtime import Runtime
 
 
@@ -48,25 +45,6 @@ class WorktreeCommands(Command):
         """
         self._commands.append(command)
         setattr(self, command._name, command.__call__)
-
-    @cached_property
-    def _alias_map(self) -> dict[str, str]:
-        command_names = {command._name for command in self._commands}
-        alias_map = {}
-        for command in self._commands:
-            for alias in command._aliases:
-                if alias in command_names:
-                    raise AliasConflictError(
-                        f"Command {command._name} wants alias {alias} "
-                        f"which conflicts with command {alias}"
-                    )
-                if alias in alias_map:
-                    raise AliasConflictError(
-                        f"Command {command._name} wants alias {alias} "
-                        f"but it already exists for {alias_map[alias]}"
-                    )
-                alias_map[alias] = command._name
-        return alias_map
 
     def version(self):
         """Outputs the version of the CLI"""

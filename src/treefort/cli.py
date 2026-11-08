@@ -49,8 +49,9 @@ def main():
         _report_usage_error(manifest, error)
         sys.exit(2)
 
-    # Help is answered from the manifest alone, before any runtime side effects
-    if parsed.help_requested:
+    # Help, and the impossible case of no command without a help request, are answered from
+    # the manifest alone, before any runtime side effects
+    if parsed.help_requested or parsed.command_name is None:
         sys.stdout.write(_help_text(manifest, parsed.command_name))
         return
 

@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import TypeVar
@@ -54,7 +54,7 @@ class BaseCommand:
 
 class Command(BaseCommand):
     _name: str
-    _aliases: list[str] = []
+    _aliases: Sequence[str] = ()
 
     def __init__(self, runtime: Runtime):
         super().__init__()

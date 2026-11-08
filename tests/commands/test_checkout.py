@@ -43,22 +43,6 @@ class CheckoutInputTestCase(TestCase):
             get_remote=Mock(return_value=None),
         )
 
-    def test_call__declares_the_cli_contract(self):
-        parameters = inspect.signature(CheckoutCommand.__call__).parameters
-
-        self.assertIs(inspect.Parameter.POSITIONAL_OR_KEYWORD, parameters["branch_or_pr"].kind)
-        self.assertEqual(
-            (str, Arg(complete=Completion.BRANCH_REF)),
-            get_args(parameters["branch_or_pr"].annotation),
-        )
-        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters["remote"].kind)
-        self.assertEqual(
-            (str | None, Arg(short="-r", complete=Completion.REMOTE)),
-            get_args(parameters["remote"].annotation),
-        )
-        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters["yes"].kind)
-        self.assertEqual((bool, Arg(short="-y")), get_args(parameters["yes"].annotation))
-
     def test_owner__pr_number_returns_config_owner(self):
         inpt = CheckoutInput(self.runtime, "1234")
         self.assertEqual(inpt.owner, "Octo")
@@ -291,3 +275,19 @@ class CheckoutCommandTestCase(TestCase):
             self.command("feature")
 
         spinner.assert_called_once_with("Fetching feature...", enabled=False)
+
+    def test_call__declares_the_cli_contract(self):
+        parameters = inspect.signature(CheckoutCommand.__call__).parameters
+
+        self.assertIs(inspect.Parameter.POSITIONAL_OR_KEYWORD, parameters["branch_or_pr"].kind)
+        self.assertEqual(
+            (str, Arg(complete=Completion.BRANCH_REF)),
+            get_args(parameters["branch_or_pr"].annotation),
+        )
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters["remote"].kind)
+        self.assertEqual(
+            (str | None, Arg(short="-r", complete=Completion.REMOTE)),
+            get_args(parameters["remote"].annotation),
+        )
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters["yes"].kind)
+        self.assertEqual((bool, Arg(short="-y")), get_args(parameters["yes"].annotation))

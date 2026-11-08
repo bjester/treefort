@@ -121,7 +121,7 @@ class CheckoutCommand(Command):
         """
         self._context.assert_within_project()
 
-        inpt = CheckoutInput(self._runtime, str(branch_or_pr), remote_name=remote)
+        inpt = CheckoutInput(self._runtime, branch_or_pr, remote_name=remote)
         inpt.validate()
 
         fetch_error = False
