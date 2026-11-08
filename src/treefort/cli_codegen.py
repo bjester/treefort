@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Annotated, Literal, Union, get_args, get_origin
 
 from treefort.cli_manifest import CLIManifest, CommandSpec, ParamSpec, max_source_mtime_ns
+from treefort.cli_parser import HELP_FLAGS, VERBOSE_FLAGS
 from treefort.command import Arg, Command, Completion
 from treefort.errors import AliasConflictError
 from treefort.main import WorktreeCommands
@@ -25,6 +26,8 @@ from treefort.shells import render_all_completions
 SHORT_FLAG_RE = re.compile(r"-[a-zA-Z]")
 PARAM_DIRECTIVE_RE = re.compile(r"^:param\s+[*]{0,2}(\w+):\s*(.*)$")
 FIELD_RE = re.compile(r"^:\w+")
+# The parser answers these before a command sees them, so a command cannot declare them
+RESERVED_FLAGS = (*HELP_FLAGS, *VERBOSE_FLAGS)
 GLOBAL_FLAGS_HELP = (
     "    -h, --help",
     "        Show this help message and exit",
@@ -290,20 +293,33 @@ def _validate_params(spec: CommandSpec) -> None:
                     f"Command {spec.name}: positional parameter {param.name} "
                     "cannot declare a short flag"
                 )
+            if param.value_type == "bool":
+                raise ValueError(
+                    f"Command {spec.name}: positional parameter {param.name} cannot be a boolean"
+                )
             continue
         if param.short is not None and SHORT_FLAG_RE.fullmatch(param.short) is None:
             raise ValueError(f"Command {spec.name}: invalid short flag {param.short}")
-        for spelling in _flag_spellings(param):
+        for spelling in _accepted_spellings(param):
+            if spelling in RESERVED_FLAGS:
+                raise ValueError(
+                    f"Command {spec.name}: flag {spelling} is reserved by the global flags"
+                )
             if spelling in seen:
                 raise ValueError(f"Command {spec.name}: duplicate flag {spelling}")
             seen[spelling] = param.name
 
 
-def _flag_spellings(param: ParamSpec) -> list[str]:
+def _accepted_spellings(param: ParamSpec) -> list[str]:
+    """Return every spelling the runtime parser accepts for a flag.
+
+    Mirrors ``cli_parser._flag_lookup``: a boolean answers to ``--no-<kebab>`` whatever its
+    default, so two parameters can collide there without colliding on their own names.
+    """
     spellings = [param.cli_name]
     if param.short is not None:
         spellings.append(param.short)
-    if param.value_type == "bool" and param.default is True:
+    if param.value_type == "bool":
         spellings.append(f"--no-{param.name.replace('_', '-')}")
     return spellings
 

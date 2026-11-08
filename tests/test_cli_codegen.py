@@ -264,6 +264,43 @@ class BuildManifestTestCase(TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate flag --no-fetch"):
             self.manifest(NegatedCommand)
 
+    def test_raises_for_a_flag_that_shadows_a_global_short_flag(self):
+        @command("global")
+        class GlobalShortCommand(Command):
+            def __call__(self, *, verbose_flag: Annotated[bool, Arg(short="-v")] = False):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "flag -v is reserved by the global flags"):
+            self.manifest(GlobalShortCommand)
+
+    def test_raises_for_a_flag_that_shadows_a_global_long_flag(self):
+        @command("global")
+        class GlobalLongCommand(Command):
+            def __call__(self, *, verbose: bool = False):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "flag --verbose is reserved by the global flags"):
+            self.manifest(GlobalLongCommand)
+
+    def test_raises_when_a_default_false_negation_shadows_another_flag(self):
+        # The parser accepts --no-<flag> for every boolean, not only for default-true ones
+        @command("negated")
+        class DefaultFalseNegationCommand(Command):
+            def __call__(self, *, fetch: bool = False, no_fetch: bool = False):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "duplicate flag --no-fetch"):
+            self.manifest(DefaultFalseNegationCommand)
+
+    def test_raises_for_a_boolean_positional(self):
+        @command("boolean")
+        class BooleanPositionalCommand(Command):
+            def __call__(self, flag: bool):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "positional parameter flag cannot be a boolean"):
+            self.manifest(BooleanPositionalCommand)
+
     def test_raises_for_a_duplicate_command_name(self):
         @command("sample")
         class DuplicateCommand(Command):
