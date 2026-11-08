@@ -1,3 +1,4 @@
+import importlib.util
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -5,6 +6,10 @@ from typing import Literal
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 GENERATED_MODULE_NAME = "_cli_generated.py"
+
+
+class ManifestUnavailable(RuntimeError):
+    """Raised when the generated CLI manifest is missing and cannot be rebuilt."""
 
 
 @dataclass(frozen=True)
@@ -56,7 +61,9 @@ def max_source_mtime_ns(package_dir: Path | None = None) -> int:
     The generated module is excluded so writing it never makes the manifest look stale.
 
     :param package_dir: The package directory to scan, defaulting to this package
-    :return: The newest ``st_mtime_ns``, or ``0`` when there are no sources
+    :return: The newest ``st_mtime_ns``, or ``0`` when there are no sources. A path that holds
+        no directory, such as a module inside a zip archive, also yields ``0`` so a shipped
+        generated manifest stays authoritative.
     """
     directory = PACKAGE_DIR if package_dir is None else package_dir
     newest = 0
@@ -88,6 +95,23 @@ def is_packaged() -> bool:
     return any(entry.endswith(".pex") for entry in sys.path)
 
 
+def extract_synopsis(help_text: str) -> str:
+    """Return the ``SYNOPSIS`` line from pre-rendered help text.
+
+    :param help_text: Rendered help text
+    :return: The synopsis line, or an empty string when there is none
+    """
+    lines = help_text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() != "SYNOPSIS":
+            continue
+        for candidate in lines[index + 1 :]:
+            if candidate.strip():
+                return candidate.strip()
+        break
+    return ""
+
+
 def load_manifest() -> CLIManifest:
     """Return the CLI manifest, rebuilding it only for a stale or unbuilt source checkout."""
     try:
@@ -98,12 +122,33 @@ def load_manifest() -> CLIManifest:
         # rebuild that would hide the real error.
         if getattr(error, "name", None) not in ("treefort", "treefort._cli_generated"):
             raise
+        if not _can_rebuild():
+            raise ManifestUnavailable(
+                "treefort is missing its generated CLI manifest; reinstall it, or run "
+                "'make codegen' in a source checkout"
+            ) from None
         return _build_manifest()
 
-    if is_packaged() or _cli_generated._SOURCE_MTIME_NS >= max_source_mtime_ns():
+    if (
+        is_packaged()
+        or not _can_rebuild()
+        or _cli_generated._SOURCE_MTIME_NS >= max_source_mtime_ns()
+    ):
         return _cli_generated.MANIFEST
 
     return _build_manifest()
+
+
+def _can_rebuild() -> bool:
+    """Return whether the generator is available to rebuild the manifest.
+
+    Built artifacts exclude the generator, and a PEX or wheel can put the package anywhere, so
+    the generated manifest is authoritative whenever a rebuild is impossible.
+    """
+    try:
+        return importlib.util.find_spec("treefort.cli_codegen") is not None
+    except (ImportError, ValueError):
+        return False
 
 
 def _build_manifest() -> CLIManifest:

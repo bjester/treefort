@@ -1,5 +1,8 @@
 import builtins
 import os
+import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -9,10 +12,14 @@ from unittest import TestCase
 from unittest.mock import patch
 
 import treefort
+from treefort.cli_codegen import build_manifest, write_generated_module
 from treefort.cli_manifest import (
+    PACKAGE_DIR,
     CLIManifest,
     CommandSpec,
+    ManifestUnavailable,
     ParamSpec,
+    _can_rebuild,
     is_packaged,
     load_manifest,
     max_source_mtime_ns,
@@ -187,6 +194,35 @@ class LoadManifestTestCase(TestCase):
         self.assertIs(rebuilt, manifest)
         build_mock.assert_called_once_with()
 
+    def test_returns_generated_manifest_when_it_cannot_be_rebuilt(self):
+        with (
+            patch.object(treefort, "_cli_generated", self.generated(mtime_ns=1_000), create=True),
+            patch("treefort.cli_manifest.is_packaged", return_value=False),
+            patch("treefort.cli_manifest.max_source_mtime_ns", return_value=2_000),
+            patch("treefort.cli_manifest._can_rebuild", return_value=False),
+            patch("treefort.cli_manifest._build_manifest") as build_mock,
+        ):
+            manifest = load_manifest()
+
+        self.assertIs(SAMPLE_MANIFEST, manifest)
+        build_mock.assert_not_called()
+
+    def test_can_rebuild__is_false_when_the_generator_is_absent(self):
+        with patch("treefort.cli_manifest.importlib.util.find_spec", return_value=None):
+            self.assertFalse(_can_rebuild())
+
+    def test_can_rebuild__is_true_when_the_generator_is_available(self):
+        with patch("treefort.cli_manifest.importlib.util.find_spec", return_value=object()):
+            self.assertTrue(_can_rebuild())
+
+    def test_raises_a_clear_error_when_the_manifest_is_missing_and_cannot_be_rebuilt(self):
+        with (
+            missing_generated_module(),
+            patch("treefort.cli_manifest._can_rebuild", return_value=False),
+        ):
+            with self.assertRaisesRegex(ManifestUnavailable, "missing its generated CLI manifest"):
+                load_manifest()
+
     def test_rebuilds_when_the_generated_module_is_missing(self):
         rebuilt = SimpleNamespace(name="rebuilt")
         with (
@@ -225,3 +261,50 @@ class LoadManifestTestCase(TestCase):
         # Importing or importing from the generator at module scope would ship it in artifacts
         self.assertFalse(hasattr(treefort.cli_manifest, "cli_codegen"))
         self.assertFalse(hasattr(treefort.cli_manifest, "build_manifest"))
+
+
+class PackagedLayoutTestCase(TestCase):
+    """Reproduces an installed artifact that excludes the generator, as wheels and PEX do."""
+
+    def test_load_manifest__serves_the_generated_manifest_without_the_generator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "lib"
+            package = root / "treefort"
+            shutil.copytree(
+                PACKAGE_DIR,
+                package,
+                ignore=shutil.ignore_patterns("cli_codegen.py", "_cli_generated.py", "__pycache__"),
+            )
+            generated = package / "_cli_generated.py"
+            write_generated_module(generated, build_manifest())
+            # Mark the manifest stale so only the "cannot rebuild" rule can save it
+            stale = re.sub(
+                r"_SOURCE_MTIME_NS = \d+",
+                "_SOURCE_MTIME_NS = 1",
+                generated.read_text(encoding="utf-8"),
+            )
+            generated.write_text(stale, encoding="utf-8")
+
+            script = (
+                "import sys\n"
+                f"sys.path.insert(0, {str(root)!r})\n"
+                "import treefort\n"
+                f"assert treefort.__file__.startswith({str(root)!r}), treefort.__file__\n"
+                "from treefort.cli_manifest import load_manifest\n"
+                "print(sorted(load_manifest().commands))\n"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+
+            self.assertEqual("", result.stderr, result.stderr)
+            self.assertEqual(
+                "['aliases', 'checkout', 'create', 'init', 'install',"
+                " 'prune', 'remove', 'version']",
+                result.stdout.strip(),
+            )

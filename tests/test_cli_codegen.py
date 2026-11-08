@@ -684,3 +684,21 @@ class MainTestCase(TestCase):
 
             self.assertTrue(output.exists())
             self.assertIn("MANIFEST = CLIManifest(", output.read_text(encoding="utf-8"))
+
+
+class ManifestDriftTestCase(TestCase):
+    """Compares the checked-out generated module against the live command classes."""
+
+    @property
+    def generated_path(self) -> Path:
+        return Path(__file__).resolve().parent.parent / "src" / "treefort" / "_cli_generated.py"
+
+    def test_manifest_is_up_to_date(self):
+        if not self.generated_path.exists():
+            self.skipTest("run `make codegen` to compare against the generated manifest")
+
+        spec = importlib.util.spec_from_file_location("generated_drift_check", self.generated_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        self.assertEqual(build_manifest(), module.MANIFEST)

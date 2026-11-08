@@ -1,71 +1,66 @@
 import logging
 import sys
 
-import fire
-
+from treefort import ui
+from treefort.cli_manifest import (
+    CLIManifest,
+    ManifestUnavailable,
+    extract_synopsis,
+    load_manifest,
+)
+from treefort.cli_parser import parse_cli_args
+from treefort.errors import CLIUsageError
 from treefort.main import WorktreeCommands
 
 
-def replace_alias(cli: WorktreeCommands):
-    """
-    Replaces an alias with its corresponding full subcommand name in the system
-    arguments if the provided subcommand is an alias.
-
-    This function inspects the command-line arguments and, if an alias is found
-    as the first subcommand, replaces it with the full subcommand name as defined
-    in the alias map of the provided `WorktreeCommands` instance.
-
-    :param cli: An instance of WorktreeCommands containing the alias map used to
-                resolve aliases to their corresponding full subcommand names.
-    """
-    subcommand = sys.argv[1] if len(sys.argv) > 1 else None
-    if subcommand is not None and subcommand in cli._alias_map.keys():
-        sys.argv[1] = cli._alias_map[subcommand]
+def _help_text(manifest: CLIManifest, command_name: str | None) -> str:
+    """Return the pre-rendered help text for a command, or for the program."""
+    if command_name is None:
+        return manifest.root_help_text
+    return manifest.commands[command_name].help_text
 
 
-def replace_verbose():
-    """
-    Parses command-line arguments to determine if the verbose mode is enabled.
+def _usage_hint(manifest: CLIManifest, command_name: str | None) -> str:
+    """Return the command a user should run to see usage."""
+    if command_name is None:
+        return f"{manifest.prog_name} --help"
+    return f"{manifest.prog_name} {command_name} --help"
 
-    This function searches arguments before the passthrough separator (`--`) for
-    verbose flags (`-v` and `--verbose`). Matching flags are removed from
-    `sys.argv`, and verbose mode is considered enabled.
 
-    :return: A boolean indicating whether verbose mode is enabled.
-    """
-    is_verbose = False
-
-    passthrough_index = sys.argv.index("--") if "--" in sys.argv else len(sys.argv)
-    kept_args = [sys.argv[0]]
-
-    for arg in sys.argv[1:passthrough_index]:
-        if arg in ("-v", "--verbose"):
-            is_verbose = True
-            continue
-        kept_args.append(arg)
-
-    if passthrough_index < len(sys.argv):
-        kept_args.extend(sys.argv[passthrough_index:])
-
-    sys.argv[:] = kept_args
-    return is_verbose
+def _report_usage_error(manifest: CLIManifest, error: CLIUsageError) -> None:
+    """Write a usage error, the relevant synopsis, and the hint to show usage."""
+    synopsis = extract_synopsis(_help_text(manifest, error.command_name))
+    sys.stderr.write(f"{ui.red(f'✗ {error}', sys.stderr)}\n")
+    if synopsis:
+        sys.stderr.write(f"{synopsis}\n")
+    sys.stderr.write(f"Run '{_usage_hint(manifest, error.command_name)}' for usage.\n")
 
 
 def main():
     """CLI tool for managing Git worktrees"""
-    is_verbose = replace_verbose()
-    component = None
+    try:
+        manifest = load_manifest()
+    except ManifestUnavailable as error:
+        sys.exit(f"treefort: {error}")
 
     try:
-        component = WorktreeCommands(verbose=is_verbose)
-        replace_alias(component)
+        parsed = parse_cli_args(manifest, sys.argv[1:])
+    except CLIUsageError as error:
+        _report_usage_error(manifest, error)
+        sys.exit(2)
 
-        # we do not pass `name` here, because the CLI allows using an alias for the command. if name
-        # was passed, then using `worktree -- --completion` would use the wrong name for completion
-        fire.Fire(component=component)
+    # Help is answered from the manifest alone, before any runtime side effects
+    if parsed.help_requested:
+        sys.stdout.write(_help_text(manifest, parsed.command_name))
+        return
+
+    component = None
+    try:
+        component = WorktreeCommands(verbose=parsed.verbose)
+        getattr(component, parsed.command_name)(*parsed.args, **parsed.kwargs)
     except Exception as e:
         runtime = getattr(component, "_runtime", None)
-        if is_verbose or getattr(runtime, "verbose", False) is True:
+        if parsed.verbose or getattr(runtime, "verbose", False) is True:
             raise
         logger = getattr(component, "_logger", None) or logging.getLogger(WorktreeCommands._name)
         logger.error(f"Command failed: {str(e)}")
