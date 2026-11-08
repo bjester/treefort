@@ -1,10 +1,13 @@
+import inspect
 import os
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import get_args
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+from treefort.command import Arg
 from treefort.commands.install import InstallCommand
 
 
@@ -17,6 +20,25 @@ class InstallCommandTestCase(TestCase):
 
     def tearDown(self):
         self.tmp_dir.cleanup()
+
+    def test_call__declares_every_flag_as_keyword_only_with_a_short_flag(self):
+        parameters = inspect.signature(InstallCommand.__call__).parameters
+
+        self.assertEqual(
+            {
+                "alias": (str | None, Arg(short="-a")),
+                "gh_ext": (bool, Arg(short="-g")),
+                "path_bin": (bool, Arg(short="-p")),
+                "force": (bool, Arg(short="-f")),
+            },
+            {
+                name: (get_args(parameter.annotation)[0], get_args(parameter.annotation)[1])
+                for name, parameter in parameters.items()
+                if name != "self"
+            },
+        )
+        for name in ("alias", "gh_ext", "path_bin", "force"):
+            self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters[name].kind)
 
     @patch("sys.argv", ["/usr/bin/treefort"])
     @patch("shutil.copy")

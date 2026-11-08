@@ -19,6 +19,14 @@ class WorktreeCommands(Command):
     """
 
     _name = "treefort"
+    _command_classes: tuple[type[Command], ...] = (
+        CreateCommand,
+        CheckoutCommand,
+        InitCommand,
+        InstallCommand,
+        RemoveCommand,
+        PruneCommand,
+    )
 
     def __init__(self, verbose: bool = False):
         """
@@ -27,17 +35,14 @@ class WorktreeCommands(Command):
         runtime = Runtime(self._name, verbose)
         super().__init__(runtime)
         self._commands: list[Command] = []
-        self._add(CreateCommand(self._runtime))
-        self._add(CheckoutCommand(self._runtime))
-        self._add(InitCommand(self._runtime))
-        self._add(InstallCommand(self._runtime))
-        self._add(RemoveCommand(self._runtime))
-        self._add(PruneCommand(self._runtime))
+        for command_class in self._command_classes:
+            self._add(command_class(self._runtime))
 
     def _add(self, command: Command):
-        """
-        Get around where Fire wants keyword flags if commands are set as callable attributes. This
-        approach allows positional arguments
+        """Register a command instance and expose its `__call__` under the canonical name.
+
+        Dispatch invokes the bound `__call__` directly, so parsed positional and flag values
+        apply to it without another layer in between.
 
         :param command: The command instance
         """
@@ -46,9 +51,15 @@ class WorktreeCommands(Command):
 
     @cached_property
     def _alias_map(self) -> dict[str, str]:
+        command_names = {command._name for command in self._commands}
         alias_map = {}
         for command in self._commands:
             for alias in command._aliases:
+                if alias in command_names:
+                    raise AliasConflictError(
+                        f"Command {command._name} wants alias {alias} "
+                        f"which conflicts with command {alias}"
+                    )
                 if alias in alias_map:
                     raise AliasConflictError(
                         f"Command {command._name} wants alias {alias} "

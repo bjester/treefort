@@ -1,8 +1,9 @@
 import re
 from functools import cached_property
+from typing import Annotated
 
 from treefort import ui
-from treefort.command import Command
+from treefort.command import Arg, Command, Completion, command
 from treefort.errors import BranchInputError, CommandError, RemoteNotFoundError, RemoteUsageError
 from treefort.git import GitUri
 from treefort.hooks import Hook
@@ -89,10 +90,15 @@ class CheckoutInput:
         return self.branch_or_pr
 
 
+@command("checkout")
 class CheckoutCommand(Command):
-    _name = "checkout"
-
-    def __call__(self, branch_or_pr: str, remote: str | None = None, yes: bool = False):
+    def __call__(
+        self,
+        branch_or_pr: Annotated[str, Arg(complete=Completion.BRANCH_REF)],
+        *,
+        remote: Annotated[str | None, Arg(short="-r", complete=Completion.REMOTE)] = None,
+        yes: Annotated[bool, Arg(short="-y")] = False,
+    ):
         """
         Checkout an existing branch or PR as a worktree.
 

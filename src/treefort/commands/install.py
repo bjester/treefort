@@ -3,19 +3,20 @@ import shutil
 import stat
 import sys
 from pathlib import Path
+from typing import Annotated
 
-from treefort.command import Command
+from treefort.command import Arg, Command, command
 
 
+@command("install")
 class InstallCommand(Command):
-    _name = "install"
-
     def __call__(
         self,
-        alias: str | None = None,
-        gh_ext: bool = False,
-        path_bin: bool = False,
-        force: bool = False,
+        *,
+        alias: Annotated[str | None, Arg(short="-a")] = None,
+        gh_ext: Annotated[bool, Arg(short="-g")] = False,
+        path_bin: Annotated[bool, Arg(short="-p")] = False,
+        force: Annotated[bool, Arg(short="-f")] = False,
     ):
         """Installs treefort as a GitHub CLI extension or to the user's PATH.
 

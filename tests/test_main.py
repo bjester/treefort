@@ -21,6 +21,33 @@ class WorktreeCommandsTestCase(TestCase):
         self.assertIn("rm", alias_map)
         self.assertEqual(alias_map["rm"], "remove")
 
+    def test_init__instantiates_every_declared_command_class(self):
+        self.assertEqual(
+            ["create", "checkout", "init", "install", "remove", "prune"],
+            [command._name for command in self.commands._commands],
+        )
+
+    def test_alias_map__raises_when_an_alias_conflicts_with_a_command_name(self):
+        self.commands._commands.append(SimpleNamespace(_name="duplicate", _aliases=["prune"]))
+
+        with self.assertRaisesRegex(
+            AliasConflictError,
+            "Command duplicate wants alias prune which conflicts with command prune",
+        ):
+            _ = self.commands._alias_map
+
+    def test_alias_map__raises_regardless_of_command_registration_order(self):
+        self.commands._commands = [
+            SimpleNamespace(_name="alpha", _aliases=["prune"]),
+            SimpleNamespace(_name="prune", _aliases=[]),
+        ]
+
+        with self.assertRaisesRegex(
+            AliasConflictError,
+            "Command alpha wants alias prune which conflicts with command prune",
+        ):
+            _ = self.commands._alias_map
+
     def test_alias_map__raises_when_aliases_conflict(self):
         self.commands._commands.append(SimpleNamespace(_name="duplicate", _aliases=["rm"]))
 

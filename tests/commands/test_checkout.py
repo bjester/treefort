@@ -1,9 +1,12 @@
+import inspect
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import get_args
 from unittest import TestCase
 from unittest.mock import ANY, Mock, patch
 
+from treefort.command import Arg, Completion
 from treefort.commands.checkout import CheckoutCommand, CheckoutInput
 from treefort.errors import BranchInputError, CommandError, RemoteNotFoundError
 from treefort.git import GitRemote
@@ -39,6 +42,22 @@ class CheckoutInputTestCase(TestCase):
             context=self.context,
             get_remote=Mock(return_value=None),
         )
+
+    def test_call__declares_the_cli_contract(self):
+        parameters = inspect.signature(CheckoutCommand.__call__).parameters
+
+        self.assertIs(inspect.Parameter.POSITIONAL_OR_KEYWORD, parameters["branch_or_pr"].kind)
+        self.assertEqual(
+            (str, Arg(complete=Completion.BRANCH_REF)),
+            get_args(parameters["branch_or_pr"].annotation),
+        )
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters["remote"].kind)
+        self.assertEqual(
+            (str | None, Arg(short="-r", complete=Completion.REMOTE)),
+            get_args(parameters["remote"].annotation),
+        )
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters["yes"].kind)
+        self.assertEqual((bool, Arg(short="-y")), get_args(parameters["yes"].annotation))
 
     def test_owner__pr_number_returns_config_owner(self):
         inpt = CheckoutInput(self.runtime, "1234")

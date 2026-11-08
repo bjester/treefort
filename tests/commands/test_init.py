@@ -1,10 +1,13 @@
+import inspect
 import pathlib
 import tempfile
 from contextlib import contextmanager
 from types import SimpleNamespace
+from typing import get_args
 from unittest import TestCase
 from unittest.mock import MagicMock, Mock, patch
 
+from treefort.command import Arg
 from treefort.commands.init import InitCommand, RepositoryTarget, normalize
 from treefort.errors import RepositoryPathError
 from treefort.hooks import Hook
@@ -159,6 +162,19 @@ class InitCommandTestCase(TestCase):
 
     def tearDown(self):
         self.tmp_dir.cleanup()
+
+    def test_call__declares_destination_dir_as_an_optional_positional(self):
+        parameter = inspect.signature(InitCommand.__call__).parameters["destination_dir"]
+
+        self.assertIs(inspect.Parameter.POSITIONAL_OR_KEYWORD, parameter.kind)
+        self.assertIsNone(parameter.default)
+
+    def test_call__declares_yes_as_a_keyword_only_short_flag(self):
+        parameter = inspect.signature(InitCommand.__call__).parameters["yes"]
+
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameter.kind)
+        self.assertIs(False, parameter.default)
+        self.assertEqual((bool, Arg(short="-y")), get_args(parameter.annotation))
 
     def test_call__basic(self):
         command = InitCommand(self.runtime)

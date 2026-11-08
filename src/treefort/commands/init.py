@@ -1,7 +1,8 @@
 import re
+from typing import Annotated
 
 from treefort import ui
-from treefort.command import Command
+from treefort.command import Arg, Command, command
 from treefort.config import RepositoryConfig, TomlConfigIO
 from treefort.errors import ProjectExistsError, RepositoryPathError
 from treefort.git import GitUri
@@ -55,12 +56,17 @@ class RepositoryTarget:
         return self._destination_dir
 
 
+@command("init")
 class InitCommand(Command):
     """Initialize a project for use with treefort"""
 
-    _name = "init"
-
-    def __call__(self, repo: str, *destination_dir: str | None, yes: bool = False):
+    def __call__(
+        self,
+        repo: str,
+        destination_dir: str | None = None,
+        *,
+        yes: Annotated[bool, Arg(short="-y")] = False,
+    ):
         """
         Initialize a project for using treefort with it, by cloning the project and configuring
         it to be a bare git repo.
@@ -82,7 +88,6 @@ class InitCommand(Command):
         :param yes: Perform any action automatically without asking (execute new or modified hooks)
         :type yes: bool
         """
-        destination_dir = destination_dir[0] if destination_dir else None
         repo_target = RepositoryTarget(repo, destination_dir=destination_dir)
         repo_target.validate()
 

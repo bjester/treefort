@@ -1,13 +1,20 @@
+from typing import Annotated
+
 from treefort import ui
-from treefort.command import Command
+from treefort.command import Arg, Command, Completion, command
 from treefort.hooks import Hook
 from treefort.utils import normalize_worktree_name
 
 
+@command("create")
 class CreateCommand(Command):
-    _name = "create"
-
-    def __call__(self, worktree_name: str, *base_ref: str | None, yes: bool = False):
+    def __call__(
+        self,
+        worktree_name: str,
+        base_ref: Annotated[str | None, Arg(complete=Completion.BASE_REF)] = None,
+        *,
+        yes: Annotated[bool, Arg(short="-y")] = False,
+    ):
         """
         Create a new worktree in the current project.
 
@@ -28,7 +35,6 @@ class CreateCommand(Command):
         :param yes: Perform any action automatically without asking (execute new or modified hooks)
         :type yes: bool
         """
-        base_ref = base_ref[0] if base_ref else None
         self._context.assert_within_project()
         git_remote_name = None
 
