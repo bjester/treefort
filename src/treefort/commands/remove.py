@@ -47,7 +47,10 @@ class RemoveCommand(Command):
         normalized_name = normalize_worktree_name(worktree_name)
         branch_name: str | None = None
 
-        with self._context.use(project_dir):
+        # Removing the active worktree deletes the directory the user is standing in. `end_at`
+        # names the project root deliberately: if this block's `cwd` ever changes, the shell
+        # still lands outside the worktree being removed.
+        with self._context.use(project_dir, end_at=project_dir):
             self._runtime.hooks.fire(
                 Hook.pre_remove, worktree_name, normalized_name, bypass_allowlist=yes
             )

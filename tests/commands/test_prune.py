@@ -15,6 +15,7 @@ class StubContext:
         self.project_dir = project_dir
         self._config = config
         self.assert_called = False
+        self.used = None
 
     def assert_within_project(self):
         self.assert_called = True
@@ -23,7 +24,8 @@ class StubContext:
         return self._config
 
     @contextmanager
-    def use(self, cwd):
+    def use(self, cwd, end_at=None):
+        self.used = (cwd, end_at)
         yield
 
 
@@ -125,6 +127,7 @@ class PruneCommandTestCase(TestCase):
         with patch("builtins.input", return_value="y"):
             self.command()
 
+        self.assertEqual(self.context.used, (self.project_dir, self.project_dir))
         self.git.remove_worktree.assert_called_once_with("feature-branch", force=False)
         self.git.delete_branch_if_head.assert_called_once_with("feature-branch", "abc123def456")
         self.hooks.fire.assert_any_call(

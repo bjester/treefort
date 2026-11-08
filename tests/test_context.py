@@ -147,19 +147,39 @@ class ContextTestCase(TestCase):
         with self.context.use("project"):
             self.assertEqual(self.context.cwd, project_dir.resolve())
 
-    def test_use__falls_back_to_project_dir_when_old_cwd_deleted(self):
+    def test_use__ends_in_the_block_directory_when_old_cwd_deleted(self):
         project_dir = self.make_project()
+        block_dir = project_dir / "elsewhere"
+        block_dir.mkdir()
         old_cwd = project_dir / "feature-a"
         self.context.cwd = old_cwd
         os.chdir(old_cwd)
 
-        with self.context.use(project_dir):
+        with self.context.use(block_dir):
             shutil.rmtree(old_cwd)
 
-        self.assertEqual(self.context.cwd, project_dir)
-        self.assertEqual(Path.cwd(), project_dir)
+        # No implicit guess at the project root: without end_at the block ends where it ran.
+        self.assertEqual(self.context.cwd, block_dir.resolve())
+        self.assertEqual(Path.cwd(), block_dir.resolve())
 
-    def test_use__requests_cd_to_project_dir_when_old_cwd_deleted(self):
+    def test_use__ends_at_the_requested_directory_when_old_cwd_deleted(self):
+        project_dir = self.make_project()
+        end_at = project_dir / "elsewhere"
+        end_at.mkdir()
+        old_cwd = project_dir / "feature-a"
+        cd_file = self.tmp_path / "cd-file"
+        self.context.cwd = old_cwd
+        os.chdir(old_cwd)
+
+        with patch.dict(os.environ, {"TREEFORT_CD_FILE": str(cd_file)}):
+            with self.context.use(project_dir, end_at=end_at):
+                shutil.rmtree(old_cwd)
+
+        self.assertEqual(self.context.cwd, end_at.resolve())
+        self.assertEqual(Path.cwd(), end_at.resolve())
+        self.assertEqual(cd_file.read_text(encoding="utf-8"), f"{end_at.resolve()}\n")
+
+    def test_use__requests_cd_to_the_block_directory_when_old_cwd_deleted(self):
         project_dir = self.make_project()
         old_cwd = project_dir / "feature-a"
         cd_file = self.tmp_path / "cd-file"

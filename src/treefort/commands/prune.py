@@ -125,7 +125,10 @@ class PruneCommand(Command):
 
         try:
             normalized_name = normalize_worktree_name(candidate.worktree_name)
-            with self._context.use(project_dir):
+            # Pruning the active worktree deletes the directory the user is standing in. `end_at`
+            # names the project root deliberately: if this block's `cwd` ever changes, the shell
+            # still lands outside the worktree being removed.
+            with self._context.use(project_dir, end_at=project_dir):
                 self._runtime.hooks.fire(
                     Hook.pre_remove,
                     candidate.worktree_name,

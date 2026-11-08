@@ -92,7 +92,19 @@ class Context:
             return Path.home() / ".treefort"
 
     @contextmanager
-    def use(self, cwd: str | Path):
+    def use(self, cwd: str | Path, end_at: str | Path | None = None):
+        """Run the block with the working directory changed, then restore it.
+
+        The block ends back in the directory it started in. When that directory no longer
+        exists, which happens when the command removed the worktree the user was standing in,
+        the block ends in ``end_at`` instead; a command that can delete the starting directory
+        passes it when the block's own directory is not a safe place to land. Without
+        ``end_at`` the block ends in ``cwd``, which is where the process already is.
+
+        :param cwd: The directory to change into for the duration of the block
+        :param end_at: The directory to end in when the starting directory no longer exists
+        :raises OSError: If ``cwd`` does not exist, or the directory to end in does not exist
+        """
         old_cwd = self.cwd
         cwd_path = Path(cwd).resolve()
         os.chdir(cwd_path)
@@ -104,17 +116,11 @@ class Context:
                 os.chdir(old_cwd)
                 self.cwd = old_cwd
             else:
-                # The previous directory may have been deleted by the command, such as when
-                # removing the active worktree; recover in the project root instead, or in
-                # the requested directory if the project cannot be resolved anymore.
-                try:
-                    fallback_dir = self.project_dir
-                except AncestorNotFoundError:
-                    fallback_dir = cwd_path
-                os.chdir(fallback_dir)
-                self.cwd = fallback_dir
-                if self.shell_integration_active and not self.request_cd(fallback_dir):
-                    logger.warning(f'Shell was not moved; run: cd "{fallback_dir}"')
+                target_dir = Path(end_at).resolve() if end_at is not None else cwd_path
+                os.chdir(target_dir)
+                self.cwd = target_dir
+                if self.shell_integration_active and not self.request_cd(target_dir):
+                    logger.warning(f'Shell was not moved; run: cd "{target_dir}"')
 
     @property
     def shell_integration_active(self) -> bool:

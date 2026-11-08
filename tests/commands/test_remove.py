@@ -13,9 +13,11 @@ from treefort.hooks import Hook
 class StubContext:
     def __init__(self, project_dir):
         self.project_dir = project_dir
+        self.used = None
 
     @contextmanager
-    def use(self, cwd):
+    def use(self, cwd, end_at=None):
+        self.used = (cwd, end_at)
         yield
 
 
@@ -64,6 +66,7 @@ class RemoveCommandTestCase(TestCase):
 
         self.command("feature", force=True, delete_branch=True)
 
+        self.assertEqual(self.context.used, (self.project_dir, self.project_dir))
         self.git.remove_worktree.assert_called_once_with("feature", force=True)
         self.git.delete_branch.assert_called_once_with("feature", force=True)
         self.hooks.fire.assert_any_call(
