@@ -445,6 +445,13 @@ class ParseCliArgsTestCase(TestCase):
         with self.assertRaisesRegex(CLIUsageError, "Unknown flag: --f"):
             self.parse("rm", "feature", "--f")
 
+    def test_keeps_a_multiline_inline_value_for_long_and_short_flags(self):
+        for token in ("--cmd=first\nsecond", "-c=first\nsecond"):
+            with self.subTest(token=token):
+                parsed = self.parse("sample", "bash", token)
+
+                self.assertEqual("first\nsecond", parsed.kwargs["cmd"])
+
     def test_parses_an_empty_inline_value(self):
         parsed = self.parse("sample", "bash", "--cmd=")
 

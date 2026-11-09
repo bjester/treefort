@@ -1,4 +1,3 @@
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -10,7 +9,6 @@ VERBOSE_FLAGS = ("-v", "--verbose")
 HELP_FLAGS = ("-h", "--help")
 TRUE_VALUES = ("true", "1", "yes")
 FALSE_VALUES = ("false", "0", "no")
-SHORT_FLAG_RE = re.compile(r"^-[a-zA-Z](=.*)?$")
 
 
 @dataclass(frozen=True)
@@ -168,9 +166,6 @@ def _consume_flag(
 ) -> int:
     """Store one flag's value in ``kwargs`` and return the index of the next token."""
     token = tokens[index]
-    if not token.startswith("--") and SHORT_FLAG_RE.match(token) is None:
-        raise CLIUsageError(f"Unknown flag: {token}", command_name=spec.name)
-
     flag_token, inline_value = _split_flag_token(token)
     entry = lookup.get(flag_token)
     if entry is None:
