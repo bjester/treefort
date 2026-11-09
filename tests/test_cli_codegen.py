@@ -178,6 +178,30 @@ class BuildManifestTestCase(TestCase):
         self.assertEqual("worktree", name.completion)
         self.assertEqual("NAME", name.cli_name)
 
+    def test_marks_a_variadic_positional_as_optional(self):
+        @command("variadic")
+        class VariadicCommand(Command):
+            def __call__(self, *extras: str):
+                pass
+
+        spec = self.manifest(VariadicCommand).commands["variadic"]
+        extras = spec.params[0]
+
+        self.assertEqual("variadic_positional", extras.kind)
+        self.assertFalse(extras.required)
+        self.assertFalse(extras.has_default)
+        self.assertIsNone(extras.default)
+        self.assertIn("treefort variadic [EXTRAS]...", spec.help_text)
+
+    def test_raises_for_a_keyword_only_flag_without_a_default(self):
+        @command("required")
+        class RequiredFlagCommand(Command):
+            def __call__(self, *, target: str):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "flag parameter target must declare a default"):
+            self.manifest(RequiredFlagCommand)
+
     def test_extracts_keyword_only_flags(self):
         spec = self.manifest(OtherCommand).commands["other"]
         fetch = next(param for param in spec.params if param.name == "fetch")

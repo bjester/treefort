@@ -196,7 +196,9 @@ def _signature_parameters(func) -> list[inspect.Parameter]:
 def _param_spec(parameter: inspect.Parameter, param_docs: dict[str, str]) -> ParamSpec:
     kind = _parameter_kind(parameter)
     value_type, nullable, choices, arg = _resolve_annotation(parameter.annotation)
-    required = parameter.default is inspect.Parameter.empty
+    has_default = parameter.default is not inspect.Parameter.empty
+    # A variadic positional accepts zero arguments, so it is never required
+    required = not has_default and kind != "variadic_positional"
     name = parameter.name
     return ParamSpec(
         name=name,
@@ -205,8 +207,8 @@ def _param_spec(parameter: inspect.Parameter, param_docs: dict[str, str]) -> Par
         value_type=value_type,
         nullable=nullable,
         required=required,
-        has_default=not required,
-        default=None if required else _default_value(name, parameter.default),
+        has_default=has_default,
+        default=_default_value(name, parameter.default) if has_default else None,
         choices=choices,
         short=arg.short if arg is not None else None,
         completion=arg.complete.value if arg is not None else Completion.NONE.value,
@@ -300,6 +302,11 @@ def _validate_params(spec: CommandSpec) -> None:
             continue
         if param.short is not None and SHORT_FLAG_RE.fullmatch(param.short) is None:
             raise ValueError(f"Command {spec.name}: invalid short flag {param.short}")
+        if not param.has_default:
+            raise ValueError(
+                f"Command {spec.name}: flag parameter {param.name} must declare a default "
+                "(required flags are not supported)"
+            )
         for spelling in _accepted_spellings(param):
             if spelling in RESERVED_FLAGS:
                 raise ValueError(
