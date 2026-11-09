@@ -29,12 +29,15 @@ _treefort_positional_count() {
     for (( i=start+1; i < COMP_CWORD; i++ )); do
         word="${COMP_WORDS[i]}"
         if (( expect )); then
-            expect=0
+            # Interactive bash splits --flag=value into --flag, =, value
+            if [ "$word" != "=" ]; then
+                expect=0
+            fi
             continue
         fi
         case "$word" in
             -*=*) continue ;;
-            -*)
+            -?*)
                 for flag in "${value_flags[@]}"; do
                     if [ "$word" = "$flag" ]; then
                         expect=1

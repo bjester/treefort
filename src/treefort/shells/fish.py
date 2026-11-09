@@ -26,7 +26,7 @@ function __treefort_positional_count
     set -l tokens (commandline -opc)
     set -l index 1
     while test $index -lt (count $tokens)
-        if not string match -qr '^-' -- $tokens[(math $index + 1)]
+        if not string match -qr '^-.+' -- $tokens[(math $index + 1)]
             break
         end
         set index (math $index + 1)
@@ -36,6 +36,12 @@ function __treefort_positional_count
     for word in $tokens[(math $index + 2)..-1]
         if test $expect -eq 1
             set expect 0
+            continue
+        end
+        # fish case and string-match patterns treat '?' literally, so the bare dash is
+        # matched explicitly rather than folded into the flag pattern below
+        if test "$word" = "-"
+            set count (math $count + 1)
             continue
         end
         switch $word
@@ -152,7 +158,8 @@ def _positional_rule(spec: CommandSpec, param: ParamSpec, index: int, cmd: str) 
     condition = f"__fish_seen_subcommand_from {' '.join([spec.name, *spec.aliases])}"
     value_flags = " ".join(value_flag_spellings(spec))
     counted = f"__treefort_positional_count {value_flags}".strip()
-    positioned = f"{condition}; and test ({counted}) -eq {index}"
+    comparison = "-ge" if param.kind == "variadic_positional" else "-eq"
+    positioned = f"{condition}; and test ({counted}) {comparison} {index}"
     return (
         f"complete -c {cmd} -n {_quote(positioned)} -a {_fish_candidates(source)} "
         f"-d {_quote(param.description)}"

@@ -172,6 +172,24 @@ CREATE = CommandSpec(
     help_text="",
 )
 
+VARIADIC = CommandSpec(
+    name="multi",
+    aliases=(),
+    summary="",
+    description="",
+    params=(
+        param(name="first", cli_name="FIRST", choices=("one", "two")),
+        param(
+            name="rest",
+            cli_name="REST",
+            kind="variadic_positional",
+            required=False,
+            choices=("alpha", "beta"),
+        ),
+    ),
+    help_text="",
+)
+
 COMMANDS = {
     "checkout": CHECKOUT,
     "create": CREATE,
@@ -283,6 +301,19 @@ class ShellsTestCase(TestCase):
         stub = "_treefort_branch_refs() { printf '%s\\n' main feature; }"
 
         words = self.bash(["treefort", "checkout", "-r", "origin", ""], 4, helper_override=stub)
+
+        self.assertEqual(["main", "feature"], words)
+
+    def test_bash_completion_script__counts_a_bare_dash_as_a_positional(self):
+        self.assertEqual(HOOK_WORDS, self.bash(["treefort", "shell-init", "-", ""], 3))
+
+    def test_bash_completion_script__ignores_the_word_break_inside_an_inline_value(self):
+        # Interactive bash splits --remote=origin into --remote, =, origin
+        stub = "_treefort_branch_refs() { printf '%s\\n' main feature; }"
+
+        words = self.bash(
+            ["treefort", "checkout", "--remote", "=", "origin", ""], 5, helper_override=stub
+        )
 
         self.assertEqual(["main", "feature"], words)
 
@@ -443,6 +474,11 @@ class ShellsTestCase(TestCase):
             if "git " in line:
                 self.assertIn("2>/dev/null", line)
 
+    def test_fish_completion_script__offers_a_variadic_positional_after_its_index(self):
+        script = fish_shell.completion_script({"multi": VARIADIC}, {}, "treefort")
+
+        self.assertIn("test (__treefort_positional_count) -ge 1'", script)
+
     def test_fish_completion_script__disables_file_completion(self):
         self.assertIn("complete -c __CMD__ -f", self.scripts["fish"])
 
@@ -467,10 +503,24 @@ class FishCompletionTestCase(TestCase):
             self.assertEqual(
                 sorted(HOOK_WORDS), self.complete(path, tmp, "treefort shell-init bash ")
             )
+            self.assertEqual(sorted(HOOK_WORDS), self.complete(path, tmp, "treefort shell-init - "))
             # The candidates come from git, so only their presence is stable here
             self.assertNotEqual([], self.complete(path, tmp, "treefort checkout --remote origin "))
             self.assertEqual(
                 [], self.complete(path, tmp, "treefort checkout --remote origin main ")
+            )
+
+    @skipUnless(shutil.which("fish"), "fish is not installed")
+    def test_fish_completion__offers_a_variadic_positional_repeatedly(self):
+        script = fish_shell.completion_script({"multi": VARIADIC}, {}, "treefort")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "completions.fish"
+            path.write_text(script, encoding="utf-8")
+            self.assertEqual(["one", "two"], self.complete(path, tmp, "treefort multi "))
+            self.assertEqual(["alpha", "beta"], self.complete(path, tmp, "treefort multi one "))
+            self.assertEqual(
+                ["alpha", "beta"], self.complete(path, tmp, "treefort multi one alpha ")
             )
 
     def complete(self, script: Path, home: str, line: str) -> list[str]:
