@@ -69,8 +69,8 @@ class ArgTestCase(TestCase):
 
 
 class CompletionTestCase(TestCase):
-    def test_str_returns_the_provider_name(self):
+    def test_str__returns_the_provider_name(self):
         self.assertEqual("worktree", str(Completion.WORKTREE))
 
-    def test_str_and_format_agree_on_the_provider_name(self):
+    def test_str__agrees_with_format(self):
         self.assertEqual(str(Completion.WORKTREE_SWITCH), f"{Completion.WORKTREE_SWITCH}")

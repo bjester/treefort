@@ -332,6 +332,14 @@ class ParseCliArgsTestCase(TestCase):
                 self.assertEqual((value,), parsed.args)
                 self.assertIsInstance(parsed.args[0], str)
 
+    def test_keeps_numeric_and_boolean_looking_flag_values_verbatim(self):
+        for value in ("125", "1.10", "True", "0x1f", "-"):
+            with self.subTest(value=value):
+                parsed = self.parse("sample", "bash", "--cmd", value)
+
+                self.assertEqual({"cmd": value}, parsed.kwargs)
+                self.assertIsInstance(parsed.kwargs["cmd"], str)
+
     def test_keeps_a_bare_dash_as_a_positional(self):
         parsed = self.parse("create", "-")
 
