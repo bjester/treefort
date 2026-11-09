@@ -11,6 +11,18 @@ class ValidationError(WorktreeError):
     pass
 
 
+class CLIUsageError(ValidationError):
+    """Raised when CLI arguments or flags are invalid"""
+
+    def __init__(self, message: str, *, command_name: str | None = None):
+        """
+        :param message: The message describing the usage problem
+        :param command_name: The command whose synopsis should be shown with the error
+        """
+        super().__init__(message)
+        self.command_name = command_name
+
+
 class WorktreeNameError(ValidationError):
     """Raised when worktree name is invalid"""
 

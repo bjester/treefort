@@ -1,7 +1,7 @@
 # treefort project style guide
 
 # Introduction
-This style guide outlines the coding conventions for the project `treefort`. The project is a CLI utility that assists software developers in their use of git worktrees. The project uses `python-fire` to provide the CLI and is structured into classes which represent the commands that can be invoked.
+This style guide outlines the coding conventions for the project `treefort`. The project is a CLI utility that assists software developers in their use of git worktrees. The project uses a purpose-built, zero-dependency CLI engine, and is structured into classes which represent the commands that can be invoked. Commands declare their CLI contract declaratively with `@command` and `typing.Annotated[T, Arg(...)]`, and a build-time generator renders the manifest, help text, and shell completions.
 
 # Key Principles
 * **Readability:** Code should be broken into understandable units and align with the Single Responsibility Principle (SRP).
