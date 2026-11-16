@@ -78,7 +78,7 @@ def missing_generated_module():
 
 
 @contextmanager
-def failing_generated_import(failure: ImportError):
+def failing_generated_import(failure: Exception):
     """Raise ``failure`` for the generated module import and delegate every other import."""
     real_import = builtins.__import__
 
@@ -280,6 +280,53 @@ class LoadManifestTestCase(TestCase):
             with failing_generated_import(failure):
                 with self.assertRaises(ModuleNotFoundError):
                     load_manifest()
+
+        build_mock.assert_not_called()
+
+    def test_rebuilds_when_the_generated_module_holds_stale_dataclass_fields(self):
+        # The gitignored module survives a branch switch, so it can hold dataclasses built
+        # against fields that no longer exist
+        failure = TypeError(
+            "ParamSpec.__init__() got an unexpected keyword argument 'legacy_field'"
+        )
+        rebuilt = SimpleNamespace(name="rebuilt")
+        with (
+            failing_generated_import(failure),
+            patch("treefort.cli_manifest.is_packaged", return_value=False),
+            patch("treefort.cli_manifest._can_rebuild", return_value=True),
+            patch("treefort.cli_manifest._build_manifest", return_value=rebuilt) as build_mock,
+        ):
+            manifest = load_manifest()
+
+        self.assertIs(rebuilt, manifest)
+        build_mock.assert_called_once_with()
+
+    def test_propagates_stale_dataclass_fields_in_a_packaged_build(self):
+        failure = TypeError(
+            "ParamSpec.__init__() got an unexpected keyword argument 'legacy_field'"
+        )
+        with (
+            failing_generated_import(failure),
+            patch("treefort.cli_manifest.is_packaged", return_value=True),
+            patch("treefort.cli_manifest._build_manifest") as build_mock,
+        ):
+            with self.assertRaises(TypeError):
+                load_manifest()
+
+        build_mock.assert_not_called()
+
+    def test_propagates_stale_dataclass_fields_without_the_generator(self):
+        failure = TypeError(
+            "ParamSpec.__init__() got an unexpected keyword argument 'legacy_field'"
+        )
+        with (
+            failing_generated_import(failure),
+            patch("treefort.cli_manifest.is_packaged", return_value=False),
+            patch("treefort.cli_manifest._can_rebuild", return_value=False),
+            patch("treefort.cli_manifest._build_manifest") as build_mock,
+        ):
+            with self.assertRaises(TypeError):
+                load_manifest()
 
         build_mock.assert_not_called()
 

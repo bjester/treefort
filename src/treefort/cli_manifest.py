@@ -128,6 +128,14 @@ def load_manifest() -> CLIManifest:
                 "'make codegen' in a source checkout"
             ) from None
         return _build_manifest()
+    except TypeError:
+        # The gitignored generated module survives branch switches, so a checkout can hold one
+        # built against dataclass fields that have since changed. That fails to construct
+        # here, before the staleness check below can order a rebuild. Only a rebuildable
+        # checkout can fix that; a packaged build must surface the real error.
+        if is_packaged() or not _can_rebuild():
+            raise
+        return _build_manifest()
 
     if (
         is_packaged()
