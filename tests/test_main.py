@@ -10,7 +10,7 @@ class WorktreeCommandsTestCase(TestCase):
     def setUp(self):
         self.commands = WorktreeCommands()
 
-    def test_add__registers_command_name_but_not_alias(self):
+    def test_init__registers_command_name_but_not_alias(self):
         self.assertTrue(callable(self.commands.remove))
         self.assertFalse(hasattr(self.commands, "rm"))
 

@@ -33,18 +33,9 @@ class WorktreeCommands(Command):
         super().__init__(runtime)
         self._commands: list[Command] = []
         for command_class in self._command_classes:
-            self._add(command_class(self._runtime))
-
-    def _add(self, command: Command):
-        """Register a command instance and expose its `__call__` under the canonical name.
-
-        Dispatch invokes the bound `__call__` directly, so parsed positional and flag values
-        apply to it without another layer in between.
-
-        :param command: The command instance
-        """
-        self._commands.append(command)
-        setattr(self, command._name, command.__call__)
+            command = command_class(self._runtime)
+            self._commands.append(command)
+            setattr(self, command._name, command)
 
     def version(self):
         """Outputs the version of the CLI"""
