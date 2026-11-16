@@ -78,25 +78,25 @@ def _split_summary(lines: list[str]) -> tuple[str, list[str]]:
 def _split_directives(lines: list[str]) -> tuple[str, dict[str, str]]:
     description = []
     params: dict[str, list[str]] = {}
-    current = None
+    entries: list[str] | None = None
     in_directives = False
     for line in lines:
         stripped = line.strip()
         match = PARAM_DIRECTIVE_RE.match(stripped)
         if match:
             in_directives = True
-            current = match.group(1)
-            params[current] = [match.group(2).strip()]
+            entries = [match.group(2).strip()]
+            params[match.group(1)] = entries
             continue
         if FIELD_RE.match(stripped):
             in_directives = True
-            current = None
+            entries = None
             continue
         if in_directives:
             if not stripped:
-                current = None
-            elif current is not None:
-                params[current].append(stripped)
+                entries = None
+            elif entries is not None:
+                entries.append(stripped)
             continue
         description.append(line)
 
