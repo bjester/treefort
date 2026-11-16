@@ -1,10 +1,13 @@
+import inspect
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import get_args
 from unittest import TestCase
 from unittest.mock import Mock, call, patch
 
+from treefort.command import Arg, Completion
 from treefort.commands.remove import RemoveCommand
 from treefort.errors import CommandError, WorktreeNotFoundError
 from treefort.hooks import Hook
@@ -50,6 +53,27 @@ class RemoveCommandTestCase(TestCase):
         self.git.delete_branch.assert_not_called()
         self.logger.warning.assert_called_once_with(
             "Skipping branch deletion for worktree 'detached': no associated local branch found."
+        )
+
+    def test_call__declares_the_cli_contract(self):
+        parameters = inspect.signature(RemoveCommand.__call__).parameters
+
+        self.assertIs(inspect.Parameter.POSITIONAL_OR_KEYWORD, parameters["worktree_name"].kind)
+        self.assertEqual(
+            (str, Arg(complete=Completion.WORKTREE)),
+            get_args(parameters["worktree_name"].annotation),
+        )
+        self.assertEqual(
+            {
+                "force": (bool, Arg(short="-f")),
+                "yes": (bool, Arg(short="-y")),
+                "delete_branch": (bool, Arg(short="-d")),
+            },
+            {
+                name: (get_args(parameter.annotation)[0], get_args(parameter.annotation)[1])
+                for name, parameter in parameters.items()
+                if name != "self" and name != "worktree_name"
+            },
         )
 
     def test_call__raises_when_missing(self):

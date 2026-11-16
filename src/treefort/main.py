@@ -1,5 +1,3 @@
-from functools import cached_property
-
 from treefort import __version__
 from treefort.command import Command
 from treefort.commands.checkout import CheckoutCommand
@@ -8,7 +6,6 @@ from treefort.commands.init import InitCommand
 from treefort.commands.install import InstallCommand
 from treefort.commands.prune import PruneCommand
 from treefort.commands.remove import RemoveCommand
-from treefort.errors import AliasConflictError
 from treefort.runtime import Runtime
 
 
@@ -19,6 +16,14 @@ class WorktreeCommands(Command):
     """
 
     _name = "treefort"
+    _command_classes: tuple[type[Command], ...] = (
+        CreateCommand,
+        CheckoutCommand,
+        InitCommand,
+        InstallCommand,
+        RemoveCommand,
+        PruneCommand,
+    )
 
     def __init__(self, verbose: bool = False):
         """
@@ -27,35 +32,10 @@ class WorktreeCommands(Command):
         runtime = Runtime(self._name, verbose)
         super().__init__(runtime)
         self._commands: list[Command] = []
-        self._add(CreateCommand(self._runtime))
-        self._add(CheckoutCommand(self._runtime))
-        self._add(InitCommand(self._runtime))
-        self._add(InstallCommand(self._runtime))
-        self._add(RemoveCommand(self._runtime))
-        self._add(PruneCommand(self._runtime))
-
-    def _add(self, command: Command):
-        """
-        Get around where Fire wants keyword flags if commands are set as callable attributes. This
-        approach allows positional arguments
-
-        :param command: The command instance
-        """
-        self._commands.append(command)
-        setattr(self, command._name, command.__call__)
-
-    @cached_property
-    def _alias_map(self) -> dict[str, str]:
-        alias_map = {}
-        for command in self._commands:
-            for alias in command._aliases:
-                if alias in alias_map:
-                    raise AliasConflictError(
-                        f"Command {command._name} wants alias {alias} "
-                        f"but it already exists for {alias_map[alias]}"
-                    )
-                alias_map[alias] = command._name
-        return alias_map
+        for command_class in self._command_classes:
+            command = command_class(self._runtime)
+            self._commands.append(command)
+            setattr(self, command._name, command)
 
     def version(self):
         """Outputs the version of the CLI"""

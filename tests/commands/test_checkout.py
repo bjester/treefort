@@ -1,9 +1,12 @@
+import inspect
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import get_args
 from unittest import TestCase
 from unittest.mock import ANY, Mock, patch
 
+from treefort.command import Arg, Completion
 from treefort.commands.checkout import CheckoutCommand, CheckoutInput
 from treefort.errors import BranchInputError, CommandError, RemoteNotFoundError
 from treefort.git import GitRemote
@@ -39,6 +42,20 @@ class CheckoutInputTestCase(TestCase):
             context=self.context,
             get_remote=Mock(return_value=None),
         )
+
+    def test_validate__accepts_a_hyphenated_branch_name(self):
+        CheckoutInput(self.runtime, "my-branch").validate()
+
+    def test_validate__accepts_a_dotted_release_branch(self):
+        CheckoutInput(self.runtime, "release-0.5.x").validate()
+
+    def test_validate__rejects_an_input_that_is_not_a_branch(self):
+        with self.assertRaises(BranchInputError):
+            CheckoutInput(self.runtime, "not a branch").validate()
+
+    def test_validate__rejects_a_bare_dash(self):
+        with self.assertRaises(BranchInputError):
+            CheckoutInput(self.runtime, "-").validate()
 
     def test_owner__pr_number_returns_config_owner(self):
         inpt = CheckoutInput(self.runtime, "1234")
@@ -118,6 +135,12 @@ class CheckoutCommandTestCase(TestCase):
         self.hooks.fire.assert_any_call(
             Hook.post_checkout, "feature", ANY, "feature", bypass_allowlist=False
         )
+
+    def test_call__uses_a_hyphenated_branch_name(self):
+        self.command("my-branch")
+
+        self.git.fetch.assert_called_once_with("origin", "my-branch:my-branch")
+        self.git.open_worktree.assert_called_once_with("my-branch")
 
     def test_call__uses_remote_and_branch_name(self):
         self.command("feature", remote="aremote")
@@ -272,3 +295,19 @@ class CheckoutCommandTestCase(TestCase):
             self.command("feature")
 
         spinner.assert_called_once_with("Fetching feature...", enabled=False)
+
+    def test_call__declares_the_cli_contract(self):
+        parameters = inspect.signature(CheckoutCommand.__call__).parameters
+
+        self.assertIs(inspect.Parameter.POSITIONAL_OR_KEYWORD, parameters["branch_or_pr"].kind)
+        self.assertEqual(
+            (str, Arg(complete=Completion.BRANCH_REF)),
+            get_args(parameters["branch_or_pr"].annotation),
+        )
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters["remote"].kind)
+        self.assertEqual(
+            (str | None, Arg(short="-r", complete=Completion.REMOTE)),
+            get_args(parameters["remote"].annotation),
+        )
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters["yes"].kind)
+        self.assertEqual((bool, Arg(short="-y")), get_args(parameters["yes"].annotation))

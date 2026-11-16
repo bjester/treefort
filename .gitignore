@@ -1,3 +1,6 @@
+# Generated CLI manifest
+/src/treefort/_cli_generated.py
+
 # Python-generated files
 __pycache__/
 *.py[oc]

@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Annotated
 
-from treefort.command import Command
+from treefort.command import Arg, Command, command
 from treefort.errors import CommandError
 from treefort.hooks import Hook
 from treefort.utils import normalize_worktree_name
@@ -16,12 +17,16 @@ class PruneCandidate:
     expected_head: str
 
 
+@command("prune")
 class PruneCommand(Command):
     """Prune worktrees whose associated PRs have been merged"""
 
-    _name = "prune"
-
-    def __call__(self, force: bool = False, yes: bool = False):
+    def __call__(
+        self,
+        *,
+        force: Annotated[bool, Arg(short="-f")] = False,
+        yes: Annotated[bool, Arg(short="-y")] = False,
+    ):
         """
         Prune worktrees whose associated PRs have been merged.
 

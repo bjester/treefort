@@ -1,7 +1,8 @@
 from pathlib import Path
+from typing import Annotated
 
 from treefort import ui
-from treefort.command import Command
+from treefort.command import Arg, Command, Completion, command
 from treefort.errors import CommandError, WorktreeNotFoundError
 from treefort.hooks import Hook
 from treefort.utils import normalize_worktree_name
@@ -10,18 +11,17 @@ from treefort.utils import normalize_worktree_name
 LOCAL_BRANCH_REF_PREFIX = "refs/heads/"
 
 
+@command("remove", aliases=("rm",))
 class RemoveCommand(Command):
     """Remove a worktree from the current project"""
 
-    _name = "remove"
-    _aliases = ["rm"]
-
     def __call__(
         self,
-        worktree_name: str,
-        force: bool = False,
-        yes: bool = False,
-        delete_branch: bool = False,
+        worktree_name: Annotated[str, Arg(complete=Completion.WORKTREE)],
+        *,
+        force: Annotated[bool, Arg(short="-f")] = False,
+        yes: Annotated[bool, Arg(short="-y")] = False,
+        delete_branch: Annotated[bool, Arg(short="-d")] = False,
     ):
         """
         Remove a worktree from the current project that was added with `create` or `checkout`.

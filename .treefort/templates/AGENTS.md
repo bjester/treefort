@@ -2,13 +2,18 @@
 
 ## Introduction
 
-This document governs the project `treefort`. The project is a CLI utility that assists software developers in their use of git worktrees. The project uses `python-fire` to provide the CLI and is structured into classes which represent the commands that can be invoked.
+This document governs the project `treefort`. The project is a CLI utility that assists software developers in their use of git worktrees. The project uses a purpose-built, zero-dependency CLI engine, and is structured into classes which represent the commands that can be invoked. Commands declare their CLI contract declaratively with `@command` and `typing.Annotated[T, Arg(...)]`, and a build-time generator renders the manifest, help text, and shell completions.
 
 ## Structure
 - The source code is located in `src/treefort/`
 - The CLI entry point function is `main` in `src/treefort/cli.py`
 - The primary CLI command class is located in `src/treefort/main.py`
 - The sub-command classes are located in `src/treefort/commands/`
+- The CLI command metadata decorator and parameter annotations are in `src/treefort/command.py`
+- The immutable CLI manifest model is in `src/treefort/cli_manifest.py`
+- The runtime argument parser is in `src/treefort/cli_parser.py`
+- The build-time manifest, help, and completion generator is in `src/treefort/cli_codegen.py`
+- The generated manifest, `src/treefort/_cli_generated.py`, is not tracked by Git
 - The tests are located in `tests/`
 
 ## Development environment
@@ -22,7 +27,9 @@ This document governs the project `treefort`. The project is a CLI utility that 
 - Use `uv venv` to create a virtual environment into `.venv/` which can otherwise be ignored.
 - Use `uv sync --dev` to install python packages.
 - Use `uv run pytest` (or `uv run pytest -q`) to run the test suite.
+- Use `make codegen` to regenerate `src/treefort/_cli_generated.py` after changing a command, its parameters, or its docstrings.
 - Use `make build` to build the project, generating wheel, `.pex`, and standalone binary files in `dist/`.
+- Use `make build-sdist` for a source distribution. A plain `uv build` on a clean tree ships an sdist with no CLI manifest, because the generator is excluded from it.
 - The `treefort` command can be tested within the `playground/` directory.
 - Find CI plans in the `.github/workflows` folder.
 

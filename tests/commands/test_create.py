@@ -1,9 +1,12 @@
+import inspect
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import get_args
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+from treefort.command import Arg, Completion
 from treefort.commands.create import CreateCommand
 from treefort.git import GitRemote
 from treefort.hooks import Hook
@@ -66,6 +69,23 @@ class CreateCommandTestCase(TestCase):
             "feature",
             bypass_allowlist=False,
         )
+
+    def test_call__declares_base_ref_as_an_optional_positional(self):
+        parameter = inspect.signature(CreateCommand.__call__).parameters["base_ref"]
+
+        self.assertIs(inspect.Parameter.POSITIONAL_OR_KEYWORD, parameter.kind)
+        self.assertIsNone(parameter.default)
+        self.assertEqual(
+            (str | None, Arg(complete=Completion.BASE_REF)),
+            get_args(parameter.annotation),
+        )
+
+    def test_call__declares_yes_as_a_keyword_only_short_flag(self):
+        parameter = inspect.signature(CreateCommand.__call__).parameters["yes"]
+
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameter.kind)
+        self.assertIs(False, parameter.default)
+        self.assertEqual((bool, Arg(short="-y")), get_args(parameter.annotation))
 
     def test_call__uses_default_remote(self):
         self.command("feature", "release-x")

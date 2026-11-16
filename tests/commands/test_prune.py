@@ -1,10 +1,13 @@
+import inspect
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import get_args
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
+from treefort.command import Arg
 from treefort.commands.prune import PruneCandidate, PruneCommand
 from treefort.errors import CommandError
 from treefort.hooks import Hook
@@ -58,6 +61,20 @@ class PruneCommandTestCase(TestCase):
 
     def tearDown(self):
         self.tmp_dir.cleanup()
+
+    def test_call__declares_every_flag_as_keyword_only_with_a_short_flag(self):
+        parameters = inspect.signature(PruneCommand.__call__).parameters
+
+        self.assertEqual(
+            {"force": (bool, Arg(short="-f")), "yes": (bool, Arg(short="-y"))},
+            {
+                name: (get_args(parameter.annotation)[0], get_args(parameter.annotation)[1])
+                for name, parameter in parameters.items()
+                if name != "self"
+            },
+        )
+        for name in ("force", "yes"):
+            self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters[name].kind)
 
     def test_call__no_worktrees_to_prune(self):
         self.git.list_worktrees.return_value = [

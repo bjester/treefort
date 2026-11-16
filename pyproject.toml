@@ -25,7 +25,6 @@ classifiers = [
     "Typing :: Typed"
 ]
 dependencies = [
-    "fire>=0.7.1",
     "tomlkit>=0.15.0",
 ]
 
@@ -67,6 +66,7 @@ max-complexity = 10
 
 [tool.uv.build-backend]
 source-exclude = [
+    "src/treefort/cli_codegen.py",
     ".envrc",
     ".idea/",
     ".gh/",
@@ -76,6 +76,7 @@ source-exclude = [
     "dist/"
 ]
 wheel-exclude = [
+    "src/treefort/cli_codegen.py",
     ".github/",
     ".gitignore/",
     ".precommit-config.yaml",
