@@ -54,18 +54,22 @@ _treefort_positional_count() {
 
 
 def wrapper(cmd: str = CMD_PLACEHOLDER) -> str:
-    """Render the bash function that applies the ``TREEFORT_CD_FILE`` directive."""
+    """Render the bash function that applies the ``TREEFORT_CD_FILE`` directive.
+
+    ``rc`` holds the wrapped command's exit code because zsh, which reuses this function
+    verbatim for its shell integration, makes ``status`` a read-only special parameter.
+    """
     return f"""\
 {cmd}() {{
-    local cd_file status
+    local cd_file rc
     cd_file="$(mktemp)"
     TREEFORT_CD_FILE="$cd_file" command {cmd} "$@"
-    status=$?
+    rc=$?
     if [ -s "$cd_file" ]; then
         cd -- "$(<"$cd_file")" || true
     fi
     rm -f -- "$cd_file"
-    return $status
+    return $rc
 }}"""
 
 

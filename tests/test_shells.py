@@ -557,8 +557,38 @@ class WrapperTestCase(TestCase):
                 self.assertIn("mytreefort", wrapper(shell, "mytreefort"))
 
     def test_wrapper__returns_the_status_of_the_wrapped_command(self):
-        self.assertIn("return $status", wrapper("bash"))
-        self.assertIn("return $status", wrapper("fish"))
+        """A live run returns the wrapped command's exit code, not the cleanup's."""
+        for shell in ("bash", "fish"):
+            with self.subTest(shell=shell):
+                if not shutil.which(shell):
+                    self.skipTest(f"{shell} is not installed")
+                with tempfile.TemporaryDirectory() as tmp:
+                    # A distinctive code: the cleanup commands all succeed, so their codes
+                    # would mask it
+                    target = Path(tmp) / "tfcmd"
+                    target.write_text("#!/bin/sh\nexit 5\n")
+                    target.chmod(0o700)
+                    environment = {
+                        **os.environ,
+                        "HOME": tmp,
+                        "XDG_CONFIG_HOME": tmp,
+                        "XDG_DATA_HOME": tmp,
+                        "XDG_CACHE_HOME": tmp,
+                        "PATH": f"{tmp}{os.pathsep}{os.environ['PATH']}",
+                    }
+                    program = f"{wrapper(shell, 'tfcmd')}\ntfcmd"
+                    result = subprocess.run(
+                        ["fish", "--no-config", "-c", program]
+                        if shell == "fish"
+                        else ["bash", "-c", program],
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                        check=False,
+                        env=environment,
+                    )
+                    self.assertEqual(5, result.returncode)
+                    self.assertEqual("", result.stderr, result.stderr)
 
     def test_wrapper__rejects_an_unknown_shell(self):
         with self.assertRaisesRegex(ValueError, "Unknown shell: pwsh"):
