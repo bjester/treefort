@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.10"
 
 [options]
@@ -77,12 +77,12 @@ wheels = [
 
 [[package]]
 name = "pex"
-version = "2.107.0"
+version = "2.107.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/88/8a/4e8b6f4b901be730b499829f49b772f2b694580b1604bf99197860b83dd7/pex-2.107.0.tar.gz", hash = "sha256:180f2289450c213d2ad9c7061bcd8cc6c730db651bde0cc6b8df4b87be3400a0", size = 5466307, upload-time = "2026-11-03T03:32:58.997Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/74/26/bd9649012aedd3609786aab1ed410cd40783ffb6eba62467829de946f274/pex-2.107.1.tar.gz", hash = "sha256:15244bfe81b03cee50a3b00185f1afa16f91a291405cef8fd13a4317e5fe5213", size = 5467359, upload-time = "2026-11-06T12:41:43.825Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/52/55/e74b3cb1b08a4edfef36d4a1aad488de55276ecbf2fb196437400dab490e/pex-2.107.0-py2.py35.py36.py37.py38.py39.py310.py311-none-any.whl", hash = "sha256:57c9d04956bde09f0e69184963efc516ef5d1ce986ff8dc29947c79da1701478", size = 4138106, upload-time = "2026-11-03T03:32:54.637Z" },
-    { url = "https://files.pythonhosted.org/packages/af/e3/b07d394532e9b91d70d1ceedfcbd9c18431c00c5345277ebd0eac2c9864a/pex-2.107.0-py3.py312-none-any.whl", hash = "sha256:28fff538a14f0cec0bd2e7f37c19e842fcabf405f87eddfeb2ce2b0f98c14a15", size = 1956878, upload-time = "2026-11-03T03:32:56.911Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/0f/44e03885ca153d4835ca523da3bbbc49044234f1e5d46a952e5c4451f30a/pex-2.107.1-py2.py35.py36.py37.py38.py39.py310.py311-none-any.whl", hash = "sha256:a91a85f0db90db54eac191ce5282d684dce7d8959fc1480c18314ba1d36a1bac", size = 4138444, upload-time = "2026-11-06T12:41:38.679Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/3e/96a57155bd5f786ae73d73786a071a871cd5ff46c2f88287a4d8eaaf660e/pex-2.107.1-py3.py312-none-any.whl", hash = "sha256:3afcefb2cf6b0752e110540de4b7a4c3684b5429a13a15d58f8c6559b749095b", size = 1957218, upload-time = "2026-11-06T12:41:41.593Z" },
 ]
 
 [[package]]
