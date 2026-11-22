@@ -5,11 +5,24 @@ import subprocess
 import tempfile
 from pathlib import Path
 from unittest import TestCase, skipUnless
+from unittest.mock import patch
 
 from treefort.cli_manifest import CommandSpec, ParamSpec
 from treefort.command import Completion
 from treefort.hooks import Hook
-from treefort.shells import CMD_PLACEHOLDER, SHELLS, render_all_completions, wrapper
+from treefort.shells import (
+    CMD_PLACEHOLDER,
+    DEFAULT_CMD_NAME,
+    RESERVED_SHELL_WORDS,
+    SHELLS,
+    detect_shell,
+    init_hook_line,
+    is_valid_command_name,
+    render_all_completions,
+    resolve_invoked_command,
+    shell_rc_path,
+    wrapper,
+)
 from treefort.shells import bash as bash_shell
 from treefort.shells import fish as fish_shell
 from treefort.shells import zsh as zsh_shell
@@ -590,6 +603,99 @@ class WrapperTestCase(TestCase):
                     self.assertEqual(5, result.returncode)
                     self.assertEqual("", result.stderr, result.stderr)
 
+    def wrapper_environment(self, tmp: str, extra_path: str = "") -> dict[str, str]:
+        """Return an isolated environment with a private ``TMPDIR`` for ``mktemp``."""
+        (Path(tmp) / "tmpdir").mkdir(exist_ok=True)
+        return {
+            **os.environ,
+            "HOME": tmp,
+            "XDG_CONFIG_HOME": tmp,
+            "XDG_DATA_HOME": tmp,
+            "XDG_CACHE_HOME": tmp,
+            "TMPDIR": str(Path(tmp) / "tmpdir"),
+            "PATH": f"{extra_path}{os.pathsep}{tmp}{os.pathsep}{os.environ['PATH']}",
+        }
+
+    def run_shell(self, shell: str, program: str, environment: dict[str, str]):
+        """Run ``program`` in a live shell with the isolated environment."""
+        command = (
+            ["fish", "--no-config", "-c", program] if shell == "fish" else [shell, "-c", program]
+        )
+        return subprocess.run(
+            command, capture_output=True, text=True, timeout=60, check=False, env=environment
+        )
+
+    def write_script(self, directory: str, name: str, body: str) -> Path:
+        """Write an executable stub command into ``directory``."""
+        script = Path(directory) / name
+        script.write_text(f"#!/bin/sh\n{body}\n")
+        script.chmod(0o700)
+        return script
+
+    def leftover_directive_files(self, tmp: str) -> list[Path]:
+        """Return the temporary directive files the wrapper failed to remove."""
+        return list((Path(tmp) / "tmpdir").iterdir())
+
+    def test_wrapper__changes_directory_with_the_double_dash_guard(self):
+        for shell in SHELLS:
+            with self.subTest(shell=shell):
+                self.assertIn("cd --", wrapper(shell))
+
+    def test_fish_wrapper__quotes_the_directive_file(self):
+        script = fish_shell.wrapper("tf")
+
+        self.assertIn('if test -n "$cd_file"', script)
+        self.assertIn('if test -s "$cd_file"', script)
+        self.assertIn('rm -f -- "$cd_file"', script)
+        self.assertNotIn("test -s $cd_file", script)
+
+    def test_wrapper__cleans_up_when_the_command_fails_under_set_e(self):
+        """The ``|| rc=$?`` guard keeps ``set -e`` from aborting before the cleanup."""
+        for shell in ("bash", "zsh"):
+            with self.subTest(shell=shell):
+                if not shutil.which(shell):
+                    self.skipTest(f"{shell} is not installed")
+                with tempfile.TemporaryDirectory() as tmp:
+                    self.write_script(tmp, "tfcmd", "exit 5")
+                    environment = self.wrapper_environment(tmp)
+                    program = f"set -e\n{wrapper(shell, 'tfcmd')}\ntfcmd"
+                    result = self.run_shell(shell, program, environment)
+
+                    self.assertEqual(5, result.returncode)
+                    self.assertEqual([], self.leftover_directive_files(tmp))
+
+    def test_wrapper__returns_the_status_of_a_failed_cd(self):
+        for shell in ("bash", "zsh", "fish"):
+            with self.subTest(shell=shell):
+                if not shutil.which(shell):
+                    self.skipTest(f"{shell} is not installed")
+                with tempfile.TemporaryDirectory() as tmp:
+                    self.write_script(
+                        tmp,
+                        "tfcmd",
+                        'printf "%s\\n" /nonexistent-treefort-dir > "$TREEFORT_CD_FILE"',
+                    )
+                    environment = self.wrapper_environment(tmp)
+                    result = self.run_shell(shell, f"{wrapper(shell, 'tfcmd')}\ntfcmd", environment)
+
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertEqual([], self.leftover_directive_files(tmp))
+
+    def test_wrapper__survives_an_empty_mktemp_result(self):
+        for shell in ("bash", "zsh", "fish"):
+            with self.subTest(shell=shell):
+                if not shutil.which(shell):
+                    self.skipTest(f"{shell} is not installed")
+                with tempfile.TemporaryDirectory() as tmp:
+                    fake_bin = Path(tmp) / "fakebin"
+                    fake_bin.mkdir()
+                    self.write_script(str(fake_bin), "mktemp", "exit 1")
+                    self.write_script(tmp, "tfcmd", "exit 0")
+                    environment = self.wrapper_environment(tmp, extra_path=str(fake_bin))
+                    result = self.run_shell(shell, f"{wrapper(shell, 'tfcmd')}\ntfcmd", environment)
+
+                    self.assertEqual(0, result.returncode, result.stderr)
+
     def test_wrapper__rejects_an_unknown_shell(self):
         with self.assertRaisesRegex(ValueError, "Unknown shell: pwsh"):
             wrapper("pwsh")
@@ -669,3 +775,155 @@ class WorktreeHelperTestCase(TestCase):
 
         self.assertEqual("", result.stdout)
         self.assertEqual("", result.stderr)
+
+
+class ShellHelpersTestCase(TestCase):
+    """Covers command-name validation, shell detection, hook lines, and startup files."""
+
+    def test_is_valid_command_name__accepts_a_plain_name(self):
+        self.assertTrue(is_valid_command_name("treefort"))
+
+    def test_is_valid_command_name__accepts_an_alias_with_dashes_and_digits(self):
+        for name in ("tf", "my-tf", "tf_2", "tf2"):
+            with self.subTest(name=name):
+                self.assertTrue(is_valid_command_name(name))
+
+    def test_is_valid_command_name__rejects_path_traversal(self):
+        for name in ("../evil", "a/b", "./tf", "..", "a b"):
+            with self.subTest(name=name):
+                self.assertFalse(is_valid_command_name(name))
+
+    def test_is_valid_command_name__rejects_a_leading_digit_dash_or_underscore(self):
+        for name in ("1tf", "-tf", "_tf"):
+            with self.subTest(name=name):
+                self.assertFalse(is_valid_command_name(name))
+
+    def test_is_valid_command_name__rejects_an_empty_or_padded_name(self):
+        for name in ("", " tf", "tf\n", "tf "):
+            with self.subTest(name=name):
+                self.assertFalse(is_valid_command_name(name))
+
+    def test_is_valid_command_name__rejects_every_reserved_shell_word(self):
+        for word in sorted(RESERVED_SHELL_WORDS):
+            with self.subTest(word=word):
+                self.assertFalse(is_valid_command_name(word))
+
+    def test_resolve_invoked_command__uses_the_argv0_basename(self):
+        self.assertEqual("treefort", resolve_invoked_command("/usr/local/bin/treefort"))
+
+    def test_resolve_invoked_command__preserves_a_symlinked_alias_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "treefort"
+            target.write_text("")
+            alias = Path(tmp) / "tf"
+            alias.symlink_to(target)
+
+            self.assertEqual("tf", resolve_invoked_command(str(alias)))
+
+    def test_resolve_invoked_command__falls_back_for_module_and_pex_invocations(self):
+        for argv0 in ("__main__.py", "treefort.pex", "/tmp/treefort.pex", ""):
+            with self.subTest(argv0=argv0):
+                self.assertEqual(DEFAULT_CMD_NAME, resolve_invoked_command(argv0))
+
+    def test_resolve_invoked_command__falls_back_for_a_reserved_name(self):
+        self.assertEqual(DEFAULT_CMD_NAME, resolve_invoked_command("/usr/bin/rm"))
+
+    def test_resolve_invoked_command__reads_sys_argv_by_default(self):
+        with patch("sys.argv", ["/opt/bin/tf"]):
+            self.assertEqual("tf", resolve_invoked_command())
+
+    def test_detect_shell__recognizes_a_supported_shell(self):
+        for shell in SHELLS:
+            with self.subTest(shell=shell):
+                self.assertEqual(shell, detect_shell(f"/usr/local/bin/{shell}"))
+
+    def test_detect_shell__returns_none_for_an_unsupported_shell(self):
+        for value in ("/bin/pwsh", "", "/bin/sh", "/bin/bash5"):
+            with self.subTest(value=value):
+                self.assertIsNone(detect_shell(value))
+
+    def test_detect_shell__reads_the_shell_variable_by_default(self):
+        with patch.dict(os.environ, {"SHELL": "/bin/zsh"}):
+            self.assertEqual("zsh", detect_shell())
+
+    def test_init_hook_line__evaluates_the_script_for_bash_and_zsh(self):
+        for shell in ("bash", "zsh"):
+            with self.subTest(shell=shell):
+                self.assertEqual(f'eval "$(treefort shell-init {shell})"', init_hook_line(shell))
+
+    def test_init_hook_line__sources_the_script_for_fish(self):
+        self.assertEqual("treefort shell-init fish | source", init_hook_line("fish"))
+
+    def test_init_hook_line__uses_the_given_command_name(self):
+        self.assertEqual('eval "$(tf shell-init bash)"', init_hook_line("bash", "tf"))
+        self.assertEqual("tf shell-init fish | source", init_hook_line("fish", "tf"))
+
+    def test_init_hook_line__rejects_an_unknown_shell(self):
+        with self.assertRaisesRegex(ValueError, "Unknown shell: pwsh"):
+            init_hook_line("pwsh")
+
+    def test_init_hook_line__rejects_an_invalid_command_name(self):
+        with self.assertRaisesRegex(ValueError, "Invalid command name"):
+            init_hook_line("bash", "../evil")
+
+    def test_shell_rc_path__rejects_an_unknown_shell(self):
+        with self.assertRaisesRegex(ValueError, "Unknown shell: pwsh"):
+            shell_rc_path("pwsh")
+
+    def test_shell_rc_path__prefers_zdotdir_for_zsh(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"ZDOTDIR": tmp}):
+            self.assertEqual(Path(tmp) / ".zshrc", shell_rc_path("zsh", Path("/home/u")))
+
+    def test_shell_rc_path__falls_back_to_home_for_zsh(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ZDOTDIR", None)
+
+            self.assertEqual(Path("/home/u") / ".zshrc", shell_rc_path("zsh", Path("/home/u")))
+
+    def test_shell_rc_path__uses_bashrc_when_it_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".bashrc").write_text("")
+            (home / ".bash_profile").write_text("")
+
+            with patch("treefort.shells.sys.platform", "darwin"):
+                self.assertEqual(home / ".bashrc", shell_rc_path("bash", home))
+
+    def test_shell_rc_path__uses_bash_profile_on_darwin_when_only_it_exists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".bash_profile").write_text("")
+
+            with patch("treefort.shells.sys.platform", "darwin"):
+                self.assertEqual(home / ".bash_profile", shell_rc_path("bash", home))
+
+    def test_shell_rc_path__uses_bashrc_off_darwin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".bash_profile").write_text("")
+
+            with patch("treefort.shells.sys.platform", "linux"):
+                self.assertEqual(home / ".bashrc", shell_rc_path("bash", home))
+
+    def test_shell_rc_path__uses_bashrc_on_darwin_when_neither_file_exists(self):
+        """A fresh macOS home has no startup file, so the hook creates ``.bashrc``."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+
+            with patch("treefort.shells.sys.platform", "darwin"):
+                self.assertEqual(home / ".bashrc", shell_rc_path("bash", home))
+
+    def test_shell_rc_path__uses_xdg_config_home_for_fish(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"XDG_CONFIG_HOME": tmp}):
+            self.assertEqual(
+                Path(tmp) / "fish" / "config.fish", shell_rc_path("fish", Path("/home/u"))
+            )
+
+    def test_shell_rc_path__falls_back_to_home_config_for_fish(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("XDG_CONFIG_HOME", None)
+
+            self.assertEqual(
+                Path("/home/u") / ".config" / "fish" / "config.fish",
+                shell_rc_path("fish", Path("/home/u")),
+            )

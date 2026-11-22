@@ -57,18 +57,20 @@ def wrapper(cmd: str = CMD_PLACEHOLDER) -> str:
     """Render the bash function that applies the ``TREEFORT_CD_FILE`` directive.
 
     ``rc`` holds the wrapped command's exit code because zsh, which reuses this function
-    verbatim for its shell integration, makes ``status`` a read-only special parameter.
+    verbatim for its shell integration, makes ``status`` a read-only special parameter. Every
+    step is guarded with ``||`` so a ``set -e`` shell reaches the cleanup and ``return $rc``.
     """
     return f"""\
 {cmd}() {{
-    local cd_file rc
-    cd_file="$(mktemp)"
-    TREEFORT_CD_FILE="$cd_file" command {cmd} "$@"
-    rc=$?
-    if [ -s "$cd_file" ]; then
-        cd -- "$(<"$cd_file")" || true
+    local cd_file rc=0
+    cd_file="$(mktemp)" || cd_file=""
+    TREEFORT_CD_FILE="$cd_file" command {cmd} "$@" || rc=$?
+    if [ -n "$cd_file" ]; then
+        if [ -s "$cd_file" ]; then
+            cd -- "$(<"$cd_file")" || rc=$?
+        fi
+        rm -f -- "$cd_file"
     fi
-    rm -f -- "$cd_file"
     return $rc
 }}"""
 
