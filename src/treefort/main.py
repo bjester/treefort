@@ -1,11 +1,13 @@
 from treefort import __version__
-from treefort.command import Command
+from treefort.command import BaseCommand, Command
 from treefort.commands.checkout import CheckoutCommand
 from treefort.commands.create import CreateCommand
 from treefort.commands.init import InitCommand
 from treefort.commands.install import InstallCommand
 from treefort.commands.prune import PruneCommand
 from treefort.commands.remove import RemoveCommand
+from treefort.commands.shell_init import ShellInitCommand
+from treefort.commands.switch import SwitchCommand
 from treefort.runtime import Runtime
 
 
@@ -16,13 +18,15 @@ class WorktreeCommands(Command):
     """
 
     _name = "treefort"
-    _command_classes: tuple[type[Command], ...] = (
+    _command_classes: tuple[type[BaseCommand], ...] = (
         CreateCommand,
         CheckoutCommand,
         InitCommand,
         InstallCommand,
         RemoveCommand,
         PruneCommand,
+        ShellInitCommand,
+        SwitchCommand,
     )
 
     def __init__(self, verbose: bool = False):
@@ -31,11 +35,23 @@ class WorktreeCommands(Command):
         """
         runtime = Runtime(self._name, verbose)
         super().__init__(runtime)
-        self._commands: list[Command] = []
+        self._commands: list[BaseCommand] = []
         for command_class in self._command_classes:
             command = command_class(self._runtime)
             self._commands.append(command)
             setattr(self, command._name, command)
+
+    @classmethod
+    def command_class(cls, name: str) -> type[BaseCommand] | None:
+        """Return the command class registered under ``name``.
+
+        :param name: The canonical command name
+        :return: The registered class, or ``None`` for a built-in method or unknown name
+        """
+        for command_class in cls._command_classes:
+            if command_class._name == name:
+                return command_class
+        return None
 
     def version(self):
         """Outputs the version of the CLI"""

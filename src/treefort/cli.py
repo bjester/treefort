@@ -57,6 +57,13 @@ def main():
 
     component = None
     try:
+        # A command that answers from the manifest alone runs without building the component,
+        # so it never constructs a Runtime or touches the disk
+        command_cls = WorktreeCommands.command_class(parsed.command_name)
+        if command_cls is not None and command_cls._requires_runtime is False:
+            command_cls(None)(*parsed.args, **parsed.kwargs)
+            return
+
         component = WorktreeCommands(verbose=parsed.verbose)
         getattr(component, parsed.command_name)(*parsed.args, **parsed.kwargs)
     except Exception as e:

@@ -412,11 +412,23 @@ class BuildManifestTestCase(TestCase):
         manifest = build_manifest()
 
         self.assertEqual(
-            ["aliases", "checkout", "create", "init", "install", "prune", "remove", "version"],
+            [
+                "aliases",
+                "checkout",
+                "create",
+                "init",
+                "install",
+                "prune",
+                "remove",
+                "shell-init",
+                "switch",
+                "version",
+            ],
             sorted(manifest.commands),
         )
-        self.assertEqual({"rm": "remove"}, manifest.alias_map)
+        self.assertEqual({"rm": "remove", "sw": "switch"}, manifest.alias_map)
         self.assertIn("remove (rm)", manifest.root_help_text)
+        self.assertIn("switch (sw)", manifest.root_help_text)
 
 
 class FormatRootHelpTestCase(TestCase):
