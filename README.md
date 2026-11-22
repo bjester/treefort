@@ -27,6 +27,7 @@ A CLI tool that helps you manage Git worktrees. Built as a GitHub CLI (`gh`) ext
   - [switch](#commands-switch)
   - [remove](#commands-remove)
   - [prune](#commands-prune)
+  - [sync](#commands-sync)
   - [install](#commands-install)
   - [shell-init](#commands-shell-init)
   - [version](#commands-version)
@@ -261,6 +262,29 @@ Finds worktrees whose local branch head matches a merged GitHub pull request. Un
 
 - `--force`: Bypass Git safety checks when treefort removes the worktree
 - `--yes`: Skip removal prompts and execute new or modified hooks without prompting
+
+</details>
+
+<details>
+<summary><strong><a id="commands-sync">sync</a></strong> — Synchronize project hooks and templates</summary>
+
+**Spec:** `sync [ref] [--no-fetch]`
+
+Copies `.treefort/hooks/` and `.treefort/templates/` from the repository Git tree into the
+project's `.treefort/` directory. Use it to collect hooks and templates that your team added or
+changed after you ran `init`.
+
+Files are copied byte for byte, so binary templates stay intact. Executable bits recorded in Git
+are preserved on both hooks and templates. Existing files are replaced. Files that exist only on
+your machine are kept.
+
+The command reads `<default_remote>/<default_branch>` unless you pass a `ref`. It fetches from the
+default remote before it reads the tree.
+
+- `--no-fetch`: Skip the fetch and read the ref that is already in your local repository
+
+Synced hooks are not approved automatically. The next time a synced hook runs, treefort prompts
+you to approve its new checksum.
 
 </details>
 
