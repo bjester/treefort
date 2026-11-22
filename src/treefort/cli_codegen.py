@@ -18,7 +18,7 @@ from typing import Annotated, Literal, Union, get_args, get_origin
 
 from treefort.cli_manifest import CLIManifest, CommandSpec, ParamSpec, max_source_mtime_ns
 from treefort.cli_parser import HELP_FLAGS, VERBOSE_FLAGS
-from treefort.command import Arg, Command, Completion
+from treefort.command import Arg, BaseCommand, Completion
 from treefort.errors import AliasConflictError
 from treefort.main import WorktreeCommands
 from treefort.shells import render_all_completions
@@ -104,7 +104,9 @@ def _split_directives(lines: list[str]) -> tuple[str, dict[str, str]]:
     return "\n".join(description).strip(), collapsed
 
 
-def build_manifest(command_classes: tuple[type[Command], ...] | None = None) -> CLIManifest:
+def build_manifest(
+    command_classes: tuple[type[BaseCommand], ...] | None = None,
+) -> CLIManifest:
     """Inspect the command classes and return the complete CLI manifest.
 
     Instantiating ``WorktreeCommands`` or ``Runtime`` is deliberately avoided so generating the

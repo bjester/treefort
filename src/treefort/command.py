@@ -48,16 +48,19 @@ def command(
 
 
 class BaseCommand:
-    def __init__(self):
+    _name: str
+    _aliases: Sequence[str] = ()
+    # Commands that answer from the generated manifest alone set this to False, so dispatching
+    # them never constructs a Runtime and never touches the disk
+    _requires_runtime: bool = True
+
+    def __init__(self, runtime: Runtime | None = None) -> None:
         pass
 
 
 class Command(BaseCommand):
-    _name: str
-    _aliases: Sequence[str] = ()
-
     def __init__(self, runtime: Runtime):
-        super().__init__()
+        super().__init__(runtime)
         self._runtime = runtime
 
     @property

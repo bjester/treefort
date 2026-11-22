@@ -1,7 +1,21 @@
 from dataclasses import FrozenInstanceError
 from unittest import TestCase
 
-from treefort.command import Arg, Command, Completion, command
+from treefort.command import Arg, BaseCommand, Command, Completion, command
+
+
+class BaseCommandTestCase(TestCase):
+    def test_requires_runtime__defaults_to_true(self):
+        self.assertIs(True, BaseCommand._requires_runtime)
+
+    def test_aliases__defaults_to_no_aliases(self):
+        self.assertEqual((), BaseCommand._aliases)
+
+    def test_init__accepts_no_runtime(self):
+        self.assertIsInstance(BaseCommand(), BaseCommand)
+
+    def test_init__accepts_an_explicit_none_runtime(self):
+        self.assertIsInstance(BaseCommand(None), BaseCommand)
 
 
 class CommandDecoratorTestCase(TestCase):
