@@ -28,6 +28,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras --group dev
 
+      # The shell wrapper tests run the generated scripts in a live shell, and skip when the
+      # shell is absent, so every supported shell must be present for them to mean anything
+      - name: Install shells
+        run: sudo apt-get update && sudo apt-get install -y fish zsh
+
       - name: Generate the CLI manifest
         run: make codegen
 

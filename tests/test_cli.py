@@ -1,5 +1,8 @@
 import io
+import os
+import tempfile
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -98,6 +101,39 @@ class MainTestCase(TestCase):
 
         commands_mock.assert_called_once_with(verbose=True)
         component.version.assert_called_once_with()
+
+    def test_main__runs_a_zero_runtime_command_without_building_the_component(self):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            patch("treefort.cli.sys.argv", ["treefort", "shell-init", "bash"]),
+            patch("treefort.runtime.Runtime.__init__", side_effect=AssertionError("boom")),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            main()
+
+        self.assertIn("TREEFORT_CD_FILE", stdout.getvalue())
+        self.assertEqual("", stderr.getvalue())
+
+    def test_main__runs_a_zero_runtime_command_inside_a_deleted_directory(self):
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            doomed = Path(tmp) / "doomed"
+            doomed.mkdir()
+            os.chdir(doomed)
+            doomed.rmdir()
+            try:
+                stdout = io.StringIO()
+                with (
+                    patch("treefort.cli.sys.argv", ["treefort", "shell-init", "bash"]),
+                    redirect_stdout(stdout),
+                ):
+                    main()
+            finally:
+                os.chdir(original_cwd)
+
+        self.assertIn("TREEFORT_CD_FILE", stdout.getvalue())
 
     def test_main__exits_with_2_and_reports_the_root_synopsis(self):
         code, stdout, stderr = self.run_main_expecting_exit(["bogus"])

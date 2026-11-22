@@ -288,6 +288,18 @@ class RepositoryConfig(SettingsConfig):
     def is_private(self) -> bool:
         return self._data.get("is_private", False)
 
+    @property
+    def last_worktree(self) -> str | None:
+        """The project-relative name of the worktree most recently switched away from.
+
+        TOML has no null type, so an unset or empty value reads as ``None``. Clearing the key
+        must pop it from the data rather than storing ``None``.
+        """
+        raw = self._data.get("last_worktree")
+        if raw is not None and not isinstance(raw, str):
+            raise ConfigTypeError(f"last_worktree must be a string, got {type(raw).__name__}")
+        return raw or None
+
 
 class ConfigManager:
     """Manages config"""

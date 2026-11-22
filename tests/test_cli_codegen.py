@@ -16,7 +16,7 @@ from treefort.cli_codegen import (
     write_generated_module,
 )
 from treefort.cli_manifest import CommandSpec, ParamSpec
-from treefort.command import Arg, Command, Completion, command
+from treefort.command import Arg, BaseCommand, Command, Completion, command
 from treefort.errors import AliasConflictError
 
 
@@ -391,15 +391,44 @@ class BuildManifestTestCase(TestCase):
             self.manifest(SampleCommand, OtherCommand), self.manifest(SampleCommand, OtherCommand)
         )
 
+    def test_accepts_a_command_that_does_not_require_a_runtime(self):
+        class ZeroRuntimeCommand(BaseCommand):
+            _name = "zero"
+            _requires_runtime = False
+
+            def __call__(self, thing: str):
+                """A command that never builds a runtime.
+
+                :param thing: The thing to inspect
+                """
+
+        manifest = self.manifest(ZeroRuntimeCommand)
+
+        self.assertEqual(
+            "A command that never builds a runtime.", manifest.commands["zero"].summary
+        )
+
     def test_builds_the_real_commands(self):
         manifest = build_manifest()
 
         self.assertEqual(
-            ["aliases", "checkout", "create", "init", "install", "prune", "remove", "version"],
+            [
+                "aliases",
+                "checkout",
+                "create",
+                "init",
+                "install",
+                "prune",
+                "remove",
+                "shell-init",
+                "switch",
+                "version",
+            ],
             sorted(manifest.commands),
         )
-        self.assertEqual({"rm": "remove"}, manifest.alias_map)
+        self.assertEqual({"rm": "remove", "sw": "switch"}, manifest.alias_map)
         self.assertIn("remove (rm)", manifest.root_help_text)
+        self.assertIn("switch (sw)", manifest.root_help_text)
 
 
 class FormatRootHelpTestCase(TestCase):

@@ -24,9 +24,11 @@ A CLI tool that helps you manage Git worktrees. Built as a GitHub CLI (`gh`) ext
   - [init](#commands-init)
   - [create](#commands-create)
   - [checkout](#commands-checkout)
+  - [switch](#commands-switch)
   - [remove](#commands-remove)
   - [prune](#commands-prune)
   - [install](#commands-install)
+  - [shell-init](#commands-shell-init)
   - [version](#commands-version)
 - [Installation](#installation)
 - [AI Disclosure](#ai-disclosure)
@@ -216,6 +218,26 @@ Quickly create a worktree for a PR or existing branch. Works with fork PRs regar
 </details>
 
 <details>
+<summary><strong><a id="commands-switch">switch</a></strong> — Switch to another worktree</summary>
+
+**Spec:** `switch <worktree_name|branch_name|shortcut>`
+
+**Aliases:** `sw`
+
+Switches to another worktree in the current project. Accepts a project-relative worktree name
+(including nested names such as `subpath/feature`), the name of a branch checked out in a
+worktree, or one of these shortcuts:
+
+- `-`: The previous worktree
+- `^`: The worktree on the default branch, or the project root when there is none
+- `@` or `.`: The current worktree root, or the project root when you are already in it
+
+With shell integration installed, your shell changes directory. Without it, `switch` prints the
+target path so you can use `cd "$(treefort switch <target>)"`.
+
+</details>
+
+<details>
 <summary><strong><a id="commands-remove">remove</a></strong> — Remove a worktree</summary>
 
 **Spec:** `remove [--force] [--yes] [--delete-branch] <worktree_name>`
@@ -245,14 +267,31 @@ Finds worktrees whose local branch head matches a merged GitHub pull request. Un
 <details>
 <summary><strong><a id="commands-install">install</a></strong> — Install treefort</summary>
 
-**Spec:** `install [--alias=<name>] [--gh-ext] [--path-bin] [--force]`
+**Spec:** `install [--alias=<name>] [--gh-ext] [--path-bin] [--shell] [--force]`
 
 Installs treefort as a GitHub CLI extension or to your PATH. Without options, prompts for installation method.
 
 - `--gh-ext`: Install as `gh` extension
 - `--path-bin`: Install to `~/.local/bin` or `~/bin`
+- `--shell`: Add the shell integration and tab completion hook to your shell startup file
 - `--alias`: Custom name (e.g., `wktr`)
 - `--force`: Overwrite existing installation
+
+`--shell` detects `bash`, `zsh`, or `fish` from `$SHELL`, reuses a `treefort` binary already on
+your `PATH`, and installs one when it is missing. It cannot be combined with `--gh-ext` alone.
+
+</details>
+
+<details>
+<summary><strong><a id="commands-shell-init">shell-init</a></strong> — Emit the shell integration script</summary>
+
+**Spec:** `shell-init [bash|zsh|fish]`
+
+Prints the shell wrapper that applies directory changes, followed by the tab-completion script
+for the given shell. The shell is detected from `$SHELL` when omitted, and the command name is
+taken from the invoked executable, so an `--alias` install registers under its alias.
+
+Prefer `treefort install --shell` to register the hook automatically.
 
 </details>
 
@@ -291,6 +330,21 @@ Tested on Linux. Requires Python 3.10+ for PEX.
 ./treefort install --alias=wktr --path-bin
 wktr version
 ```
+
+### Shell integration
+
+`treefort switch` cannot change your shell's directory by itself, because a child process
+cannot change its parent shell. Register the wrapper and tab completion in your startup file:
+
+```bash
+./treefort install --path-bin --shell
+```
+
+`--shell` detects your shell from `$SHELL` and appends one hook line to `~/.bashrc`,
+`~/.bash_profile` (macOS, when that is the only bash startup file present),
+`${ZDOTDIR:-~}/.zshrc`, or `${XDG_CONFIG_HOME:-~/.config}/fish/config.fish`. Running it again is
+safe. To configure a shell by hand, add the hook line `eval "$(treefort shell-init <shell>)"` to
+your startup file, or `treefort shell-init fish | source` for fish.
 
 ### From source
 

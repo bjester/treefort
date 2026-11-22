@@ -18,6 +18,7 @@ class StubContext:
         self.project_dir = project_dir
         self._config = config
         self.assert_called = False
+        self.use_calls = []
 
     def assert_within_project(self):
         self.assert_called = True
@@ -26,7 +27,8 @@ class StubContext:
         return self._config
 
     @contextmanager
-    def use(self, cwd):
+    def use(self, cwd, *, end_at=None):
+        self.use_calls.append((cwd, end_at))
         yield
 
 
@@ -86,6 +88,28 @@ class PruneCommandTestCase(TestCase):
 
         self.assertTrue(self.context.assert_called)
         self.logger.info.assert_any_call("No merged PR worktrees found to prune.")
+
+    def test_call__recovers_in_the_project_dir_when_the_worktree_is_pruned(self):
+        wt_path = str(self.project_dir / "feature-branch")
+        (self.project_dir / "feature-branch").mkdir()
+
+        self.git.list_worktrees.return_value = [
+            {"path": wt_path, "branch": "refs/heads/feature-branch", "is_bare": False},
+        ]
+        self.git.get_branch_head.return_value = "abc123def456"
+        self.gh.merged_pr_by_head.return_value = [
+            {
+                "number": 123,
+                "title": "Add awesome feature",
+                "url": "u",
+                "headRefOid": "abc123def456",
+            }
+        ]
+
+        with patch("builtins.input", return_value="y"):
+            self.command()
+
+        self.assertEqual([(self.project_dir, self.project_dir)], self.context.use_calls)
 
     def _one_eligible_worktree(self):
         worktree_path = self.project_dir / "feature-branch"

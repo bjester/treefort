@@ -61,17 +61,21 @@ def wrapper(cmd: str = CMD_PLACEHOLDER) -> str:
     """Render the fish function that applies the ``TREEFORT_CD_FILE`` directive.
 
     ``rc`` holds the wrapped command's exit code because fish makes ``status`` a read-only
-    special variable, and the cleanup below would otherwise overwrite its value.
+    special variable, and the cleanup below would otherwise overwrite its value. Quoting
+    ``"$cd_file"`` keeps an empty ``mktemp`` result from turning ``test -s`` into a true
+    one-argument test, which would leave ``cat`` waiting on standard input.
     """
     return f"""\
 function {cmd}
     set -l cd_file (mktemp)
-    TREEFORT_CD_FILE=$cd_file command {cmd} $argv
+    TREEFORT_CD_FILE="$cd_file" command {cmd} $argv
     set -l rc $status
-    if test -s $cd_file
-        cd -- (cat $cd_file)
+    if test -n "$cd_file"
+        if test -s "$cd_file"
+            cd -- (cat -- "$cd_file"); or set rc $status
+        end
+        rm -f -- "$cd_file"
     end
-    rm -f -- $cd_file
     return $rc
 end"""
 

@@ -112,6 +112,45 @@ class RepositoryConfigTestCase(TestCase):
         with self.assertRaisesRegex(ConfigTypeError, "verbose must be a boolean, got str"):
             _ = loaded.verbose
 
+    def test_last_worktree__defaults_to_none(self):
+        io = TomlConfigIO(self.tmp_path / "config.toml")
+        config = RepositoryConfig(io)
+
+        self.assertIsNone(config.last_worktree)
+
+    def test_last_worktree__treats_an_empty_string_as_unset(self):
+        io = TomlConfigIO(self.tmp_path / "config.toml")
+        config = RepositoryConfig(io)
+        config.update(last_worktree="")
+
+        self.assertIsNone(config.last_worktree)
+
+    def test_last_worktree__round_trips_a_nested_name(self):
+        io = TomlConfigIO(self.tmp_path / "config.toml")
+        config = RepositoryConfig(io)
+        config.update(last_worktree="subpath/feature")
+        config.save()
+
+        loaded = RepositoryConfig(io)
+        loaded.load()
+        self.assertEqual("subpath/feature", loaded.last_worktree)
+
+    def test_last_worktree__raises_for_an_integer(self):
+        io = TomlConfigIO(self.tmp_path / "config.toml")
+        config = RepositoryConfig(io)
+        config.update(last_worktree=125)
+
+        with self.assertRaisesRegex(ConfigTypeError, "last_worktree must be a string, got int"):
+            _ = config.last_worktree
+
+    def test_last_worktree__raises_for_a_boolean(self):
+        io = TomlConfigIO(self.tmp_path / "config.toml")
+        config = RepositoryConfig(io)
+        config.update(last_worktree=True)
+
+        with self.assertRaisesRegex(ConfigTypeError, "last_worktree must be a string, got bool"):
+            _ = config.last_worktree
+
 
 class GlobalConfigTestCase(TestCase):
     def setUp(self):
