@@ -1,16 +1,21 @@
 import re
 import subprocess
+from collections import deque
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from urllib import parse
 
 from treefort.errors import CommandError, WorktreeNameError
-from treefort.subprocess import SubprocessOperator
+from treefort.subprocess import MAX_OUTPUT_TAIL, SubprocessOperator
 
 TYPE_RE = re.compile(r"\((.*)\)")
 GIT_EXT_RE = re.compile(r"\.git$", re.IGNORECASE)
 # Git records checked-out local branches in worktree listings as this ref prefix.
 LOCAL_BRANCH_REF_PREFIX = "refs/heads/"
+# Tree modes that hold regular file content: 100644 is plain and 100755 is executable.
+# Symlinks are recorded as 120000 and subtrees as 040000, so neither carries file content.
+TREE_FILE_MODES = ("100644", "100755")
 
 
 class GitUri:
@@ -99,6 +104,46 @@ class GitRemote:
         return self.git_uri.matches(owner, name)
 
 
+@dataclass(frozen=True)
+class GitTreeEntry:
+    """A single ``git ls-tree`` record describing one path in a Git tree."""
+
+    mode: str
+    """The tree mode, such as ``100644``, ``100755``, or ``120000`` for a symlink."""
+
+    obj_type: str
+    """The object type, which is ``blob`` for files and symlinks."""
+
+    sha: str
+    """The object name of the blob holding the file content."""
+
+    path: str
+    """The repository-relative POSIX path of the entry."""
+
+    @property
+    def is_executable(self) -> bool:
+        return self.mode == "100755"
+
+
+def _parse_tree_entries(output: str) -> list[GitTreeEntry]:
+    """Parse NUL-delimited ``git ls-tree`` records into tree entries.
+
+    :param output: The raw ``git ls-tree -r -z`` output
+    :return: The parsed entries, in the order Git emitted them
+    """
+    entries = []
+    for record in output.split("\x00"):
+        if not record:
+            continue
+        metadata, separator, path = record.partition("\t")
+        fields = metadata.split(" ")
+        if not separator or len(fields) != 3:
+            raise CommandError(f"Unexpected git ls-tree record: {record!r}")
+        mode, obj_type, sha = fields
+        entries.append(GitTreeEntry(mode, obj_type, sha, path))
+    return entries
+
+
 class GitCLI(SubprocessOperator):
     command_name = "git"
 
@@ -125,6 +170,49 @@ class GitCLI(SubprocessOperator):
 
     def cat_file(self, branch_name: str, file_path: str) -> Iterator[str]:
         yield from self.iter_output(["cat-file", "-p", f"{branch_name}:{file_path}"])
+
+    def ls_tree_entries(self, ref: str, path_prefix: str) -> list[GitTreeEntry]:
+        """List the tree entries under a path in a Git ref.
+
+        :param ref: The ref whose tree to read, such as ``origin/main``
+        :param path_prefix: The repository-relative path to list
+        :return: The entries recorded in the tree, in Git's order
+        """
+        if ref.startswith("-"):
+            raise CommandError(f"Invalid ref: {ref}")
+
+        command = ["ls-tree", "-r", "-z", ref, "--", path_prefix]
+        try:
+            with self.run(command) as process:
+                return _parse_tree_entries(process.stdout)
+        except subprocess.CalledProcessError as e:
+            raise CommandError(self._format_command_error(e.returncode, command)) from e
+
+    def read_blob(self, sha: str) -> bytes:
+        """Read the raw content of a blob object.
+
+        :param sha: The object name of the blob to read
+        :return: The undecoded blob content, so binary files survive intact
+        """
+        if sha.startswith("-"):
+            raise CommandError(f"Invalid object name: {sha}")
+
+        self.last_output = deque(maxlen=MAX_OUTPUT_TAIL)
+        command = ["cat-file", "blob", sha]
+        try:
+            process = subprocess.run(
+                [self.command_name, *command],
+                capture_output=True,
+                check=True,
+                timeout=self.wait_time,
+                cwd=self.context.cwd,
+                text=False,
+            )
+        except subprocess.CalledProcessError as e:
+            for line in (e.stderr or b"").decode("utf-8", errors="replace").splitlines():
+                self._record_output_line(line)
+            raise CommandError(self._format_command_error(e.returncode, command)) from e
+        return process.stdout
 
     def fetch(self, remote: str = "origin", refspec: str | None = None):
         args = ["fetch", remote]
