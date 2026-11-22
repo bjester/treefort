@@ -91,7 +91,15 @@ class InstallCommand(Command):
         if path_bin:
             target_paths.append(self._path_bin_target(target_name))
 
-        self._run(current_script_path, target_paths, should_link, force)
+        # A shell integration install only needs the binary to be present, so an existing one
+        # must not fail the command before the hook is written
+        self._run(
+            current_script_path,
+            target_paths,
+            should_link,
+            force,
+            keep_existing=detected_shell is not None,
+        )
 
         if detected_shell is not None:
             self._install_shell_hook(detected_shell, target_name)
@@ -159,10 +167,25 @@ class InstallCommand(Command):
         target_paths: list[Path],
         should_link: bool,
         force: bool,
+        keep_existing: bool = False,
     ):
+        """Install the running script at every target path.
+
+        :param current_script_path: The script to install
+        :param target_paths: The destinations to install it at
+        :param should_link: Whether to symlink instead of copy
+        :param force: Whether to overwrite an existing target
+        :param keep_existing: Whether an existing target is acceptable instead of an error,
+            so a shell integration install still reaches the hook
+        """
         for target_path in target_paths:
             if target_path.exists() or target_path.is_symlink():
                 if not force:
+                    if keep_existing:
+                        self._logger.info(
+                            f"Keeping existing {target_path}, use --force to overwrite"
+                        )
+                        continue
                     self._logger.warning(
                         f"Path already exists, use --force to overwrite: {target_path}"
                     )

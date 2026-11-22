@@ -440,6 +440,25 @@ class InstallCommandTestCase(TestCase):
             hook = (config_home / "fish" / "config.fish").read_text(encoding="utf-8")
             self.assertIn("treefort shell-init fish | source", hook)
 
+    def test_call__keeps_an_existing_binary_and_still_configures_the_shell(self):
+        """The documented setup command must be safe to run twice."""
+        with self.shell_environment(with_binary=True) as env:
+            self.command(path_bin=True, shell=True)
+
+            self.assertEqual("installed\n", (env.user_bin / "treefort").read_text())
+            hook = (env.home / ".bashrc").read_text(encoding="utf-8")
+            self.assertIn('eval "$(treefort shell-init bash)"', hook)
+            self.runtime.logger.info.assert_any_call(
+                f"Keeping existing {env.user_bin / 'treefort'}, use --force to overwrite"
+            )
+
+    def test_call__fails_on_an_existing_binary_without_shell_integration(self):
+        with self.shell_environment(with_binary=True):
+            with self.assertRaises(SystemExit) as context:
+                self.command(path_bin=True)
+
+            self.assertEqual(1, context.exception.code)
+
     def test_call__reuses_an_existing_path_binary_for_shell_integration(self):
         with self.shell_environment(with_binary=True) as env:
             self.command(shell=True)
