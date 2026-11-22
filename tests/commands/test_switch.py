@@ -32,12 +32,15 @@ class StubContext:
 
     def __init__(self, project_dir, config):
         self.project_dir = project_dir
-        self.cwd = project_dir
+        self.current_name = None
         self._config = config
         self.cd_requests = []
         self.cd_enabled = False
         self.cd_delivered = False
         self.saved_configs = []
+
+    def current_worktree_name(self):
+        return self.current_name
 
     def assert_within_project(self):
         pass
@@ -214,9 +217,7 @@ class SwitchCommandTestCase(TestCase):
 
     def test_call__switches_to_the_current_worktree_root(self):
         self.git.list_worktrees.return_value = [self.add_worktree("feature", "refs/heads/feature")]
-        subdir = self.project_dir / "feature" / "src"
-        subdir.mkdir()
-        self.context.cwd = subdir
+        self.context.current_name = "feature"
 
         for target in ("@", "."):
             with self.subTest(target=target):
@@ -228,7 +229,6 @@ class SwitchCommandTestCase(TestCase):
 
     def test_call__switches_to_the_project_root_from_the_root(self):
         self.git.list_worktrees.return_value = [self.add_worktree("feature", "refs/heads/feature")]
-        self.context.cwd = self.project_dir
 
         self.run_command("@")
 
@@ -239,7 +239,7 @@ class SwitchCommandTestCase(TestCase):
             self.add_worktree("feature", "refs/heads/feature"),
             self.add_worktree("other", "refs/heads/other"),
         ]
-        self.context.cwd = self.project_dir / "feature"
+        self.context.current_name = "feature"
         self.context.cd_delivered = True
 
         self.run_command("other")
@@ -249,7 +249,7 @@ class SwitchCommandTestCase(TestCase):
 
     def test_call__does_not_record_a_switch_to_the_current_worktree(self):
         self.git.list_worktrees.return_value = [self.add_worktree("feature", "refs/heads/feature")]
-        self.context.cwd = self.project_dir / "feature"
+        self.context.current_name = "feature"
 
         self.run_command("@")
 
@@ -258,26 +258,30 @@ class SwitchCommandTestCase(TestCase):
 
     def test_call__does_not_record_a_switch_from_the_project_root(self):
         self.git.list_worktrees.return_value = [self.add_worktree("feature", "refs/heads/feature")]
-        self.context.cwd = self.project_dir
 
         self.run_command("feature")
 
         self.assertEqual([], self.config.updates)
 
-    def test_call__treats_a_submodule_as_the_enclosing_worktree(self):
-        """A nested repository must never reach ``last_worktree``."""
+    def test_call__maps_the_context_worktree_onto_the_listing(self):
+        """The context owns the current-worktree rule, so switch only maps its answer."""
         self.git.list_worktrees.return_value = [
-            self.add_worktree("feature", "refs/heads/feature"),
+            self.add_worktree("subpath/feature", "refs/heads/subpath/feature"),
             self.add_worktree("other", "refs/heads/other"),
         ]
-        submodule = self.project_dir / "feature" / "modules" / "lib"
-        submodule.mkdir(parents=True)
-        (submodule / ".git").write_text("gitdir: ../../../.bare/worktrees/feature/modules/lib\n")
-        self.context.cwd = submodule
+        self.context.current_name = "subpath/feature"
 
         self.run_command("other")
 
-        self.assertEqual([{"last_worktree": "feature"}], self.config.updates)
+        self.assertEqual([{"last_worktree": "subpath/feature"}], self.config.updates)
+
+    def test_call__ignores_a_context_worktree_that_is_not_listed(self):
+        self.git.list_worktrees.return_value = [self.add_worktree("other", "refs/heads/other")]
+        self.context.current_name = "gone"
+
+        self.run_command("other")
+
+        self.assertEqual([], self.config.updates)
 
     def test_call__prints_the_path_and_the_setup_hint_when_the_directive_is_unset(self):
         self.git.list_worktrees.return_value = [self.add_worktree("feature", "refs/heads/feature")]

@@ -41,12 +41,11 @@ class SwitchCommand(Command):
         """
         self._context.assert_within_project()
         project_dir = self._context.project_dir.resolve()
-        cwd = self._context.cwd.resolve()
         config = self._context.get_config()
         raw_worktrees = self._runtime.git.list_worktrees()
 
         listed = self._list_managed_worktrees(raw_worktrees, project_dir)
-        current = self._find_current_worktree(cwd, listed)
+        current = self._find_current_worktree(listed)
         target_path, target_name = self._resolve_target(
             target, current, listed, raw_worktrees, config, project_dir
         )
@@ -77,18 +76,17 @@ class SwitchCommand(Command):
             )
         return listed
 
-    def _find_current_worktree(
-        self, cwd: Path, listed: list[ListedWorktree]
-    ) -> ListedWorktree | None:
-        """Return the deepest managed worktree containing ``cwd``.
+    def _find_current_worktree(self, listed: list[ListedWorktree]) -> ListedWorktree | None:
+        """Return the listed worktree that contains the current directory.
 
-        Matching against the listed worktrees resolves a submodule or nested repository to the
-        managed worktree around it, so neither ever reaches ``last_worktree``.
+        ``Context.current_worktree_name`` is the single definition of the current worktree, so
+        submodule and nested-clone handling stays identical to the rest of the CLI. This method
+        only maps that answer onto the listing it already fetched.
         """
-        matches = [entry for entry in listed if cwd == entry.path or cwd.is_relative_to(entry.path)]
-        if not matches:
+        name = self._context.current_worktree_name()
+        if name is None:
             return None
-        return max(matches, key=lambda entry: len(entry.path.parts))
+        return next((entry for entry in listed if entry.name == name), None)
 
     def _resolve_target(
         self,
