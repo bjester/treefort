@@ -7,7 +7,8 @@ from unittest import TestCase, mock
 from unittest.mock import Mock
 
 from treefort.context import Context
-from treefort.errors import HookError, HookExistsError
+from treefort.errors import HookError, HookExistsError, ValidationError
+from treefort.git import GitTreeEntry
 from treefort.hooks import Hook, Hooks
 
 
@@ -159,3 +160,136 @@ class HooksTestCase(TestCase):
         with self.assertRaises(HookExistsError):
             with self.hooks.add(Hook.pre_init) as f:
                 f.write("echo ok")
+
+
+class HooksSyncFromGitTestCase(TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp_dir.name)
+
+        self.home_dir = self.tmp_path / "home"
+        self.home_dir.mkdir()
+        home_patcher = mock.patch.dict(os.environ, {"HOME": str(self.home_dir)})
+        home_patcher.start()
+        self.addCleanup(home_patcher.stop)
+
+        self.context = Context()
+        self.context.cwd = self.tmp_path
+        (self.tmp_path / ".bare").mkdir()
+        self.hooks_path = self.tmp_path / ".treefort" / "hooks"
+
+        self.hooks = Hooks(self.context, Mock())
+        self.git = Mock()
+        self.git.ls_tree_entries.return_value = []
+        self.git.read_blob.return_value = b""
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
+
+    def entry(self, path, mode="100644", obj_type="blob", sha="abc123"):
+        return GitTreeEntry(mode, obj_type, sha, path)
+
+    def test_sync_from_git__writes_binary_content_and_executable_mode(self):
+        payload = b"#!/bin/sh\x00\x00echo ok\xff"
+        self.git.ls_tree_entries.return_value = [self.entry(".treefort/hooks/pre_init", "100755")]
+        self.git.read_blob.return_value = payload
+
+        synced = self.hooks.sync_from_git(self.git, "origin/main")
+
+        hook_file = self.hooks_path / "pre_init"
+        self.assertEqual(1, synced)
+        self.assertEqual(payload, hook_file.read_bytes())
+        self.assertEqual(0o755, hook_file.stat().st_mode & 0o777)
+        self.git.ls_tree_entries.assert_called_once_with("origin/main", ".treefort/hooks")
+        self.git.read_blob.assert_called_once_with("abc123")
+
+    def test_sync_from_git__overwrite_false_skips_existing_file(self):
+        hook_file = self.hooks_path / "pre_init"
+        self.hooks_path.mkdir(parents=True)
+        hook_file.write_bytes(b"local hook")
+        self.git.ls_tree_entries.return_value = [self.entry(".treefort/hooks/pre_init")]
+
+        synced = self.hooks.sync_from_git(self.git, "origin/main", overwrite=False)
+
+        self.assertEqual(0, synced)
+        self.assertEqual(b"local hook", hook_file.read_bytes())
+        self.git.read_blob.assert_not_called()
+        self.hooks.logger.warning.assert_called_once()
+        self.assertIn("already exists", self.hooks.logger.warning.call_args.args[0])
+
+    def test_sync_from_git__overwrite_true_replaces_existing_file(self):
+        hook_file = self.hooks_path / "pre_init"
+        self.hooks_path.mkdir(parents=True)
+        hook_file.write_bytes(b"local hook")
+        self.git.ls_tree_entries.return_value = [self.entry(".treefort/hooks/pre_init")]
+        self.git.read_blob.return_value = b"upstream hook"
+
+        synced = self.hooks.sync_from_git(self.git, "origin/main")
+
+        self.assertEqual(1, synced)
+        self.assertEqual(b"upstream hook", hook_file.read_bytes())
+
+    def test_sync_from_git__skips_unknown_and_nested_hook_names(self):
+        self.git.ls_tree_entries.return_value = [
+            self.entry(".treefort/hooks/custom_hook"),
+            self.entry(".treefort/hooks/nested/pre_init"),
+        ]
+
+        synced = self.hooks.sync_from_git(self.git, "origin/main")
+
+        self.assertEqual(0, synced)
+        self.git.read_blob.assert_not_called()
+        self.assertFalse(self.hooks_path.exists())
+
+    def test_sync_from_git__skips_symlink_and_non_blob_entries(self):
+        self.git.ls_tree_entries.return_value = [
+            self.entry(".treefort/hooks/pre_init", "120000"),
+            self.entry(".treefort/hooks/post_init", obj_type="tree"),
+        ]
+
+        synced = self.hooks.sync_from_git(self.git, "origin/main")
+
+        self.assertEqual(0, synced)
+        self.git.read_blob.assert_not_called()
+
+    def test_sync_from_git__skips_paths_outside_the_hooks_prefix(self):
+        self.git.ls_tree_entries.return_value = [self.entry(".treefort/templates/pre_init")]
+
+        synced = self.hooks.sync_from_git(self.git, "origin/main")
+
+        self.assertEqual(0, synced)
+        self.git.read_blob.assert_not_called()
+
+    def test_sync_from_git__raises_validation_error_on_parent_traversal(self):
+        self.git.ls_tree_entries.return_value = [self.entry(".treefort/hooks/../evil")]
+
+        with self.assertRaises(ValidationError):
+            self.hooks.sync_from_git(self.git, "origin/main")
+
+        self.assertFalse((self.tmp_path / ".treefort" / "evil").exists())
+        self.git.read_blob.assert_not_called()
+
+    def test_sync_from_git__raises_validation_error_when_path_resolves_outside(self):
+        self.git.ls_tree_entries.return_value = [self.entry(".treefort/hooks/nested/../../evil")]
+
+        with self.assertRaises(ValidationError):
+            self.hooks.sync_from_git(self.git, "origin/main")
+
+        self.assertFalse((self.tmp_path / ".treefort" / "evil").exists())
+        self.git.read_blob.assert_not_called()
+
+    def test_sync_from_git__leaves_allowed_hooks_untouched(self):
+        allowed_hooks_file = self.home_dir / ".treefort" / "allowed_hooks.json"
+        self.context.get_global_config()
+        before = allowed_hooks_file.read_bytes()
+
+        self.git.ls_tree_entries.return_value = [self.entry(".treefort/hooks/pre_init", "100755")]
+        self.git.read_blob.return_value = b"#!/bin/sh\necho ok\n"
+
+        self.hooks.sync_from_git(self.git, "origin/main")
+
+        self.assertEqual(before, allowed_hooks_file.read_bytes())
+        global_config = self.context.get_global_config()
+        self.assertEqual(
+            "", global_config.allowed_hooks.get(str(self.hooks_path / "pre_init"), default="")
+        )

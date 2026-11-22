@@ -1,4 +1,5 @@
 import re
+import tempfile
 from pathlib import Path
 
 from treefort.errors import AncestorNotFoundError
@@ -37,3 +38,26 @@ def normalize_worktree_name(name: str) -> str:
     # Collapse consecutive dashes into a single dash
     result = re.sub(r"-+", "-", result)
     return result
+
+
+def write_bytes_atomically(path: Path, content: bytes, mode: int) -> None:
+    """
+    Write bytes to a sibling temporary file, then replace the destination with it.
+
+    The destination keeps its previous content when the write fails, so an interrupted
+    sync never leaves a partially written hook or template behind.
+    :param path: The destination file, whose parent directories are created as needed
+    :param content: The bytes to write
+    :param mode: The POSIX permission bits to apply before the replacement
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temp_file:
+            temp_file.write(content)
+            temp_path = Path(temp_file.name)
+        temp_path.chmod(mode)
+        temp_path.replace(path)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)

@@ -1,9 +1,10 @@
 import tempfile
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 from treefort.errors import AncestorNotFoundError
-from treefort.utils import find_up, normalize_worktree_name
+from treefort.utils import find_up, normalize_worktree_name, write_bytes_atomically
 
 
 class FindUpTestCase(TestCase):
@@ -75,3 +76,47 @@ class NormalizeWorktreeNameTestCase(TestCase):
 
     def test_consecutive_mixed_special_chars_collapsed(self):
         self.assertEqual(normalize_worktree_name("feat/@/#branch"), "feat-branch")
+
+
+class WriteBytesAtomicallyTestCase(TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp_dir.name)
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
+
+    def test_write_bytes_atomically__writes_content_and_mode(self):
+        dest = self.tmp_path / "nested" / "file.bin"
+        payload = b"\x00\x01\xff"
+
+        write_bytes_atomically(dest, payload, 0o755)
+
+        self.assertEqual(payload, dest.read_bytes())
+        self.assertEqual(0o755, dest.stat().st_mode & 0o777)
+
+    def test_write_bytes_atomically__replaces_existing_content(self):
+        dest = self.tmp_path / "file.txt"
+        dest.write_bytes(b"before")
+
+        write_bytes_atomically(dest, b"after", 0o644)
+
+        self.assertEqual(b"after", dest.read_bytes())
+
+    def test_write_bytes_atomically__leaves_no_temporary_files(self):
+        dest = self.tmp_path / "file.txt"
+
+        write_bytes_atomically(dest, b"content", 0o644)
+
+        self.assertEqual([dest], list(self.tmp_path.iterdir()))
+
+    def test_write_bytes_atomically__keeps_destination_when_replace_fails(self):
+        dest = self.tmp_path / "file.txt"
+        dest.write_bytes(b"before")
+
+        with patch.object(Path, "replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                write_bytes_atomically(dest, b"after", 0o644)
+
+        self.assertEqual(b"before", dest.read_bytes())
+        self.assertEqual([dest], list(self.tmp_path.iterdir()))

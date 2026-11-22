@@ -8,9 +8,13 @@ from pathlib import Path
 
 from treefort import ui
 from treefort.context import Context
-from treefort.errors import HookError, HookExistsError
+from treefort.errors import HookError, HookExistsError, ValidationError
+from treefort.git import TREE_FILE_MODES, GitCLI
 from treefort.operator import ConfigOperator
 from treefort.subprocess import SubprocessOperator
+from treefort.utils import write_bytes_atomically
+
+GIT_HOOKS_DIR = ".treefort/hooks"
 
 
 class Hook(Enum):
@@ -138,3 +142,46 @@ class Hooks(ConfigOperator, SubprocessOperator):
 
         # allow exec
         hook_file.chmod(hook_file.stat().st_mode | stat.S_IEXEC)
+
+    def sync_from_git(self, git: GitCLI, ref: str, overwrite: bool = True) -> int:
+        """
+        Synchronize the project hooks tracked in a Git ref into the configuration directory.
+        :param git: The Git CLI used to read the tree entries and blobs
+        :param ref: The Git ref to read the hooks from
+        :param overwrite: Whether to replace hooks that already exist on disk
+        :return: The number of hooks written
+        """
+        hooks_dir = self.context.config_dir / self.dir_name
+        synced = 0
+
+        for entry in git.ls_tree_entries(ref, GIT_HOOKS_DIR):
+            if entry.obj_type != "blob" or entry.mode not in TREE_FILE_MODES:
+                continue
+            if not entry.path.startswith(f"{GIT_HOOKS_DIR}/"):
+                continue
+
+            rel_path = entry.path.removeprefix(f"{GIT_HOOKS_DIR}/")
+            dest = self._resolve_dest(hooks_dir, rel_path, entry.path)
+            if "/" in rel_path or rel_path not in Hook.__members__:
+                continue
+            if not overwrite and dest.exists():
+                self.logger.warning(f"Hook {dest} already exists. Skipping.")
+                continue
+
+            write_bytes_atomically(dest, git.read_blob(entry.sha), 0o755)
+            synced += 1
+
+        return synced
+
+    def _resolve_dest(self, hooks_dir: Path, rel_path: str, git_path: str) -> Path:
+        """
+        Resolve a hook entry to its destination, refusing any path that escapes the hooks directory.
+        :param hooks_dir: The directory hooks are extracted into
+        :param rel_path: The entry path relative to the Git hooks directory
+        :param git_path: The full entry path, for diagnostics
+        :return: The destination path for the hook
+        """
+        dest = hooks_dir / rel_path
+        if rel_path.startswith("..") or not dest.resolve().is_relative_to(hooks_dir.resolve()):
+            raise ValidationError(f"Hook path escapes {hooks_dir}: {git_path}")
+        return dest
