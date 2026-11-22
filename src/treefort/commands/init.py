@@ -6,8 +6,7 @@ from treefort.command import Arg, Command, command
 from treefort.config import RepositoryConfig, TomlConfigIO
 from treefort.errors import ProjectExistsError, RepositoryPathError
 from treefort.git import GitUri
-from treefort.hooks import Hook, HookExists
-from treefort.templates import TemplateExists
+from treefort.hooks import Hook
 
 JUST_PATH_RE = re.compile(r"^[\w\-_]+/[\w\-_]+$")
 
@@ -146,29 +145,11 @@ class InitCommand(Command):
             )
 
     def _add_hooks(self, config):
-        """Checks whether the repo has hooks in the default branch and copies them"""
-        for hook in Hook:
-            # check to see if repo has a hook
-            if not any(self._runtime.git.ls_tree(config.default_branch, hook.git_path)):
-                continue
-
-            # copy it
-            try:
-                with self._runtime.hooks.add(hook) as f:
-                    for line in self._runtime.git.cat_file(config.default_branch, hook.git_path):
-                        f.write(f"{line}\n")
-            except HookExists as e:
-                self._logger.warning(f"Skipping due to error: {str(e)}")
+        """Copies any hooks tracked in the default branch, keeping hooks that already exist"""
+        self._runtime.hooks.sync_from_git(self._runtime.git, config.default_branch, overwrite=False)
 
     def _add_templates(self, config):
-        """Checks whether the repo has templates in the default branch and copies them"""
-        # check to see if repo has templates
-        for template_ls in self._runtime.git.ls_tree(config.default_branch, ".treefort/templates"):
-            template_file = template_ls.split("\t")[1].strip('"')
-            # copy it
-            try:
-                with self._runtime.templates.add(template_file) as f:
-                    for line in self._runtime.git.cat_file(config.default_branch, template_file):
-                        f.write(f"{line}\n")
-            except TemplateExists as e:
-                self._logger.warning(f"Skipping due to error: {str(e)}")
+        """Copies any templates tracked in the default branch, keeping existing templates"""
+        self._runtime.templates.sync_from_git(
+            self._runtime.git, config.default_branch, overwrite=False
+        )

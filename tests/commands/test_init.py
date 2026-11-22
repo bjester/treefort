@@ -131,14 +131,14 @@ class InitCommandTestCase(TestCase):
         self.config_dir = self.tmp_path / ".treefort"
         self.context = StubContext(self.tmp_path, self.config_dir)
 
-        self.hooks = SimpleNamespace(fire=Mock(), add=MagicMock())
-        self.templates = SimpleNamespace(add=MagicMock())
+        self.hooks = SimpleNamespace(
+            fire=Mock(), add=MagicMock(), sync_from_git=Mock(return_value=0)
+        )
+        self.templates = SimpleNamespace(add=MagicMock(), sync_from_git=Mock(return_value=0))
         self.git = SimpleNamespace(
             clone=Mock(),
             config=Mock(),
             fetch=Mock(),
-            ls_tree=Mock(return_value=iter([])),
-            cat_file=Mock(return_value=iter([])),
         )
         self.gh = SimpleNamespace(
             repo_status=Mock(
@@ -210,48 +210,35 @@ class InitCommandTestCase(TestCase):
             bypass_allowlist=False,
         )
 
-    def test_call__installs_hooks(self):
-
-        def ls_tree_side_effect(branch, path):
-            if path.endswith("post_checkout"):
-                return iter(["100755 blob ...    post_checkout"])
-            return iter([])
-
-        self.git.ls_tree.side_effect = ls_tree_side_effect
-        self.git.cat_file.return_value = iter(["echo 'hello'"])
-
-        mock_f = self.runtime.hooks.add.return_value.__enter__.return_value
-
+    def test_call__delegates_hook_extraction_to_sync_from_git(self):
         command = InitCommand(self.runtime)
         command("octo/repo", str(self.project_dir))
 
-        mock_f.write.assert_called_once_with("echo 'hello'\n")
+        self.hooks.sync_from_git.assert_called_once_with(self.git, "main", overwrite=False)
+        self.hooks.add.assert_not_called()
 
-    def test_call__installs_templates(self):
-        self.git.ls_tree.return_value = iter(["100755 blob ...\t.treefort/templates/example.txt"])
-        self.git.cat_file.return_value = iter(["hello"])
-        mock_f = self.runtime.templates.add.return_value.__enter__.return_value
-
+    def test_call__delegates_template_extraction_to_sync_from_git(self):
         command = InitCommand(self.runtime)
         command("octo/repo", str(self.project_dir))
 
-        self.runtime.templates.add.assert_called_once_with(".treefort/templates/example.txt")
-        mock_f.write.assert_called_once_with("hello\n")
+        self.templates.sync_from_git.assert_called_once_with(self.git, "main", overwrite=False)
+        self.templates.add.assert_not_called()
 
-    def test_add_templates__skips_existing(self):
-        from treefort.templates import TemplateExists
+    def test_add_hooks__delegates_to_sync_from_git_without_overwriting(self):
+        config = SimpleNamespace(default_branch="develop")
 
-        config = SimpleNamespace(default_branch="main")
-        self.git.ls_tree.return_value = iter(["100755 blob ...\t.treefort/templates/example.txt"])
-        self.runtime.templates.add.side_effect = TemplateExists(
-            "Template .treefort/templates/example.txt already exists."
-        )
+        command = InitCommand(self.runtime)
+        command._add_hooks(config)
+
+        self.hooks.sync_from_git.assert_called_once_with(self.git, "develop", overwrite=False)
+
+    def test_add_templates__delegates_to_sync_from_git_without_overwriting(self):
+        config = SimpleNamespace(default_branch="develop")
 
         command = InitCommand(self.runtime)
         command._add_templates(config)
 
-        self.runtime.templates.add.assert_called_once_with(".treefort/templates/example.txt")
-        self.git.cat_file.assert_not_called()
+        self.templates.sync_from_git.assert_called_once_with(self.git, "develop", overwrite=False)
 
     def test_call__logs_completion_milestone(self):
         command = InitCommand(self.runtime)
