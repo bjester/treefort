@@ -16,9 +16,11 @@ from treefort.hooks import Hook
 class StubContext:
     def __init__(self, project_dir):
         self.project_dir = project_dir
+        self.use_calls = []
 
     @contextmanager
-    def use(self, cwd):
+    def use(self, cwd, *, end_at=None):
+        self.use_calls.append((cwd, end_at))
         yield
 
 
@@ -79,6 +81,13 @@ class RemoveCommandTestCase(TestCase):
     def test_call__raises_when_missing(self):
         with self.assertRaisesRegex(WorktreeNotFoundError, "Worktree missing does not exist"):
             self.command("missing")
+
+    def test_call__recovers_in_the_project_dir_when_the_worktree_is_removed(self):
+        self.add_worktree("feature")
+
+        self.command("feature")
+
+        self.assertEqual([(self.project_dir, self.project_dir)], self.context.use_calls)
 
     def test_call__runs_hooks_and_git(self):
         self.add_worktree("feature")

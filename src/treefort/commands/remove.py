@@ -4,11 +4,9 @@ from typing import Annotated
 from treefort import ui
 from treefort.command import Arg, Command, Completion, command
 from treefort.errors import CommandError, WorktreeNotFoundError
+from treefort.git import LOCAL_BRANCH_REF_PREFIX
 from treefort.hooks import Hook
 from treefort.utils import normalize_worktree_name
-
-# Git records checked-out local branches in worktree listings as this ref prefix.
-LOCAL_BRANCH_REF_PREFIX = "refs/heads/"
 
 
 @command("remove", aliases=("rm",))
@@ -49,7 +47,7 @@ class RemoveCommand(Command):
         normalized_name = normalize_worktree_name(worktree_name)
         branch_name: str | None = None
 
-        with self._context.use(project_dir):
+        with self._context.use(project_dir, end_at=project_dir):
             self._runtime.hooks.fire(
                 Hook.pre_remove, worktree_name, normalized_name, bypass_allowlist=yes
             )

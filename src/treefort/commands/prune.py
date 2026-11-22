@@ -4,6 +4,7 @@ from typing import Annotated
 
 from treefort.command import Arg, Command, command
 from treefort.errors import CommandError
+from treefort.git import LOCAL_BRANCH_REF_PREFIX
 from treefort.hooks import Hook
 from treefort.utils import normalize_worktree_name
 
@@ -83,10 +84,10 @@ class PruneCommand(Command):
                 continue
 
             branch_ref = wt.get("branch")
-            if not branch_ref or not branch_ref.startswith("refs/heads/"):
+            if not branch_ref or not branch_ref.startswith(LOCAL_BRANCH_REF_PREFIX):
                 continue
 
-            branch_name = branch_ref.removeprefix("refs/heads/")
+            branch_name = branch_ref.removeprefix(LOCAL_BRANCH_REF_PREFIX)
             worktree_name = Path(wt["path"]).resolve().relative_to(project_dir.resolve()).as_posix()
 
             pr_infos = self._runtime.gh.merged_pr_by_head(branch_name, owner_repo=owner_repo)
@@ -130,7 +131,7 @@ class PruneCommand(Command):
 
         try:
             normalized_name = normalize_worktree_name(candidate.worktree_name)
-            with self._context.use(project_dir):
+            with self._context.use(project_dir, end_at=project_dir):
                 self._runtime.hooks.fire(
                     Hook.pre_remove,
                     candidate.worktree_name,
