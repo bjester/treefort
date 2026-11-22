@@ -1,13 +1,12 @@
 import re
 import subprocess
-from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import parse
 
 from treefort.errors import CommandError, WorktreeNameError
-from treefort.subprocess import MAX_OUTPUT_TAIL, SubprocessOperator
+from treefort.subprocess import SubprocessOperator
 
 TYPE_RE = re.compile(r"\((.*)\)")
 GIT_EXT_RE = re.compile(r"\.git$", re.IGNORECASE)
@@ -197,22 +196,12 @@ class GitCLI(SubprocessOperator):
         if sha.startswith("-"):
             raise CommandError(f"Invalid object name: {sha}")
 
-        self.last_output = deque(maxlen=MAX_OUTPUT_TAIL)
         command = ["cat-file", "blob", sha]
         try:
-            process = subprocess.run(
-                [self.command_name, *command],
-                capture_output=True,
-                check=True,
-                timeout=self.wait_time,
-                cwd=self.context.cwd,
-                text=False,
-            )
+            with self.run(command, text=False) as process:
+                return process.stdout
         except subprocess.CalledProcessError as e:
-            for line in (e.stderr or b"").decode("utf-8", errors="replace").splitlines():
-                self._record_output_line(line)
             raise CommandError(self._format_command_error(e.returncode, command)) from e
-        return process.stdout
 
     def fetch(self, remote: str = "origin", refspec: str | None = None):
         args = ["fetch", remote]

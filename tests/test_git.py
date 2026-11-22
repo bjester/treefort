@@ -280,58 +280,47 @@ class GitCLITestCase(TestCase):
 
     def test_read_blob__returns_raw_bytes(self):
         payload = b"\x89PNG\r\n\x1a\n\x00\x00binary\xff"
-        with mock.patch("treefort.git.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=["git", "cat-file", "blob", "abc123"], returncode=0, stdout=payload
-            )
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
 
-            content = self.cli.read_blob("abc123")
+        mock_process = mock.MagicMock()
+        mock_process.stdout = payload
+        mock_run.return_value.__enter__.return_value = mock_process
 
+        content = self.cli.read_blob("abc123")
+
+        mock_run.assert_called_once_with(["cat-file", "blob", "abc123"], text=False)
         self.assertEqual(content, payload)
-        mock_run.assert_called_once_with(
-            ["git", "cat-file", "blob", "abc123"],
-            capture_output=True,
-            check=True,
-            timeout=self.cli.wait_time,
-            cwd=self.context.cwd,
-            text=False,
-        )
 
     def test_read_blob__rejects_leading_dash_sha(self):
-        with mock.patch("treefort.git.subprocess.run") as mock_run:
-            with self.assertRaisesRegex(CommandError, "Invalid object name"):
-                self.cli.read_blob("--stdin")
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        with self.assertRaisesRegex(CommandError, "Invalid object name"):
+            self.cli.read_blob("--stdin")
 
         mock_run.assert_not_called()
 
-    def test_read_blob__captures_decoded_stderr_on_failure(self):
-        with mock.patch("treefort.git.subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                returncode=128,
-                cmd=["git", "cat-file", "blob", "missing"],
-                stderr=b"fatal: Not a valid object name missing\n",
-            )
+    def test_read_blob__translates_called_process_error_with_last_output(self):
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
 
-            with self.assertRaises(CommandError) as ctx:
-                self.cli.read_blob("missing")
+        self.cli.last_output = ["fatal: Not a valid object name missing"]
+        mock_run.return_value.__enter__.side_effect = subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["git", "cat-file", "blob", "missing"],
+        )
+
+        with self.assertRaises(CommandError) as ctx:
+            self.cli.read_blob("missing")
 
         self.assertIn(
             "Command failed, with exit status 128: git cat-file blob missing", str(ctx.exception)
         )
         self.assertIn("fatal: Not a valid object name missing", str(ctx.exception))
-
-    def test_read_blob__replaces_undecodable_stderr_bytes(self):
-        with mock.patch("treefort.git.subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                returncode=1,
-                cmd=["git", "cat-file", "blob", "abc123"],
-                stderr=b"\xff\xfe not utf-8",
-            )
-
-            with self.assertRaises(CommandError) as ctx:
-                self.cli.read_blob("abc123")
-
-        self.assertIn("not utf-8", str(ctx.exception))
 
     def test_fetch(self):
         self.cli.fetch()

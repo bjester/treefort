@@ -192,12 +192,13 @@ class SubprocessOperator(RuntimeOperator):
 
     @contextmanager
     def run(
-        self, command: list[str], cwd: str | Path | None = None
+        self, command: list[str], cwd: str | Path | None = None, text: bool = True
     ) -> Generator[CompletedProcess, Any, None]:
         """
         Executes a command in a subprocess and returns the completed process
         :param command: The command to execute as a list of strings
         :param cwd: The working directory to execute the command in
+        :param text: Whether to decode the output, which binary callers turn off
         """
         logger = self._get_command_logger(command)
         # Only failure paths populate last_output for run() so successful queries do not
@@ -218,7 +219,7 @@ class SubprocessOperator(RuntimeOperator):
                 process = subprocess.run(
                     command,
                     capture_output=True,
-                    text=True,
+                    text=text,
                     check=True,
                     timeout=self.wait_time,
                     cwd=cwd or self.context.cwd,
@@ -230,6 +231,9 @@ class SubprocessOperator(RuntimeOperator):
                 for stream_output in (e.stdout, e.stderr):
                     if not stream_output:
                         continue
+                    if isinstance(stream_output, bytes):
+                        # A binary caller still reports its failures as readable diagnostics
+                        stream_output = stream_output.decode("utf-8", errors="replace")
                     for line in stream_output.splitlines():
                         if stripped := self._record_output_line(line):
                             logger.debug(
