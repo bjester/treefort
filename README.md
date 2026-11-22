@@ -343,8 +343,8 @@ cannot change its parent shell. Register the wrapper and tab completion in your 
 `--shell` detects your shell from `$SHELL` and appends one hook line to `~/.bashrc`,
 `~/.bash_profile` (macOS, when that is the only bash startup file present),
 `${ZDOTDIR:-~}/.zshrc`, or `${XDG_CONFIG_HOME:-~/.config}/fish/config.fish`. Running it again is
-safe. To configure a shell by hand, add the output of `treefort shell-init <shell>` to your
-startup file.
+safe. To configure a shell by hand, add the hook line `eval "$(treefort shell-init <shell>)"` to
+your startup file, or `treefort shell-init fish | source` for fish.
 
 ### From source
 
