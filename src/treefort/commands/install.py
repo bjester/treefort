@@ -6,6 +6,31 @@ from pathlib import Path
 from typing import Annotated
 
 from treefort.command import Arg, Command, command
+from treefort.errors import ValidationError
+from treefort.shells import detect_shell, init_hook_line, is_valid_command_name, shell_rc_path
+
+HOOK_MARKER = "# treefort shell integration"
+
+
+def _user_search_path() -> str:
+    """Return the ``PATH`` entries that can hold a persistent user installation.
+
+    Relative entries and the active virtual environment's ``bin`` directory are dropped, so
+    ``uv run treefort install --shell`` does not mistake the ephemeral ``.venv`` binary for an
+    installed one.
+
+    :return: The filtered search path
+    """
+    virtual_env = os.environ.get("VIRTUAL_ENV")
+    venv_bin = (Path(virtual_env) / "bin").resolve() if virtual_env else None
+    entries = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or not Path(entry).is_absolute():
+            continue
+        if venv_bin is not None and Path(entry).resolve() == venv_bin:
+            continue
+        entries.append(entry)
+    return os.pathsep.join(entries)
 
 
 @command("install")
@@ -16,6 +41,7 @@ class InstallCommand(Command):
         alias: Annotated[str | None, Arg(short="-a")] = None,
         gh_ext: Annotated[bool, Arg(short="-g")] = False,
         path_bin: Annotated[bool, Arg(short="-p")] = False,
+        shell: Annotated[bool, Arg(short="-s")] = False,
         force: Annotated[bool, Arg(short="-f")] = False,
     ):
         """Installs treefort as a GitHub CLI extension or to the user's PATH.
@@ -25,10 +51,14 @@ class InstallCommand(Command):
         :param alias: An alternate name for the extension or path command.
         :param gh_ext: Install as a GitHub CLI extension.
         :param path_bin: Install to the user's PATH.
+        :param shell: Configure shell integration and tab completion in the active shell
+            startup file.
         :param force: Overwrite existing files.
         """
         target_name = alias or "treefort"
-        gh_ext, path_bin = self._ask(target_name, gh_ext, path_bin)
+        gh_ext, path_bin, detected_shell = self._resolve_install_modes(
+            target_name, gh_ext, path_bin, shell
+        )
 
         current_script_path = Path(sys.argv[0]).resolve()
         should_link = False
@@ -59,22 +89,69 @@ class InstallCommand(Command):
             )
 
         if path_bin:
-            path_dirs = os.getenv("PATH", "").split(os.pathsep)
-            # Common user bin directories
-            preferred_install_dirs = [
-                Path.home() / ".local" / "bin",
-                Path.home() / "bin",
-            ]
-
-            install_dir = next((d for d in preferred_install_dirs if str(d) in path_dirs), None)
-
-            if not install_dir:
-                self._logger.error("Could not find a suitable user binary directory in your PATH.")
-                sys.exit(1)
-
-            target_paths.append(install_dir / target_name)
+            target_paths.append(self._path_bin_target(target_name))
 
         self._run(current_script_path, target_paths, should_link, force)
+
+        if detected_shell is not None:
+            self._install_shell_hook(detected_shell, target_name)
+
+    def _resolve_install_modes(
+        self, target_name: str, gh_ext: bool, path_bin: bool, shell: bool
+    ) -> tuple[bool, bool, str | None]:
+        """Validate the requested install modes and resolve the shell to configure.
+
+        :param target_name: The installed command name
+        :param gh_ext: Whether a GitHub CLI extension was requested
+        :param path_bin: Whether a ``PATH`` installation was requested
+        :param shell: Whether shell integration was requested
+        :return: The resolved ``gh_ext``, ``path_bin``, and detected shell (or ``None``)
+        :raises ValidationError: When the alias, mode combination, or shell is invalid
+        """
+        if not is_valid_command_name(target_name):
+            raise ValidationError(f"Invalid alias name: {target_name!r}")
+
+        if not shell:
+            gh_ext, path_bin = self._ask(target_name, gh_ext, path_bin)
+            return gh_ext, path_bin, None
+
+        if gh_ext and not path_bin:
+            raise ValidationError(
+                "Shell integration (--shell) requires a PATH installation. "
+                "Pass --path-bin as well or omit --gh-ext."
+            )
+
+        detected_shell = detect_shell()
+        if detected_shell is None:
+            raise ValidationError(
+                "Could not detect a supported shell from $SHELL (supported: bash, zsh, fish)."
+            )
+
+        # Reuse a binary already on the user PATH, and install one when it is missing
+        if not path_bin and not gh_ext:
+            path_bin = shutil.which(target_name, path=_user_search_path()) is None
+        return gh_ext, path_bin, detected_shell
+
+    def _path_bin_target(self, target_name: str) -> Path:
+        """Return the user binary directory path to install ``target_name`` into.
+
+        :param target_name: The installed command name
+        :return: The installation target path
+        """
+        path_dirs = os.getenv("PATH", "").split(os.pathsep)
+        # Common user bin directories
+        preferred_install_dirs = [
+            Path.home() / ".local" / "bin",
+            Path.home() / "bin",
+        ]
+
+        install_dir = next((d for d in preferred_install_dirs if str(d) in path_dirs), None)
+
+        if not install_dir:
+            self._logger.error("Could not find a suitable user binary directory in your PATH.")
+            sys.exit(1)
+
+        return install_dir / target_name
 
     def _run(
         self,
@@ -90,6 +167,10 @@ class InstallCommand(Command):
                         f"Path already exists, use --force to overwrite: {target_path}"
                     )
                     sys.exit(1)
+                if not target_path.is_symlink() and target_path.resolve() == current_script_path:
+                    # Re-running from the installed binary must not unlink the running executable
+                    self._logger.info(f"Installed to {target_path}")
+                    continue
                 target_path.unlink(True)
 
             target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,6 +181,28 @@ class InstallCommand(Command):
                 shutil.copy(current_script_path, target_path)
                 target_path.chmod(target_path.stat().st_mode | stat.S_IEXEC)
             self._logger.info(f"Installed to {target_path}")
+
+    def _install_shell_hook(self, detected_shell: str, target_name: str) -> None:
+        """Append the shell integration hook to the active shell's startup file, once.
+
+        Appending in place rather than rewriting keeps startup files that dotfile managers
+        symlink into a repository as symlinks.
+
+        :param detected_shell: The shell to configure
+        :param target_name: The installed command name the hook must invoke
+        """
+        rc_path = shell_rc_path(detected_shell)
+        hook_line = init_hook_line(detected_shell, target_name)
+        existing = rc_path.read_text(encoding="utf-8") if rc_path.exists() else ""
+        if hook_line in {line.strip() for line in existing.splitlines()}:
+            self._logger.info(f"Shell integration already configured in {rc_path}")
+            return
+
+        rc_path.parent.mkdir(parents=True, exist_ok=True)
+        prefix = "" if not existing else ("\n" if existing.endswith("\n") else "\n\n")
+        with rc_path.open("a", encoding="utf-8") as stream:
+            stream.write(f"{prefix}{HOOK_MARKER}\n{hook_line}\n")
+        self._logger.info(f"Configured {detected_shell} shell integration in {rc_path}")
 
     def _ask(self, target_name: str, gh_ext: bool, path_bin: bool) -> tuple[bool, bool]:
         # ask user what path they would like to use for installation, without these args
