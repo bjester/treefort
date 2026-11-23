@@ -1,4 +1,5 @@
 import logging
+import os
 import queue
 import random
 import shlex
@@ -111,16 +112,30 @@ class SubprocessOperator(RuntimeOperator):
             return logging.getLogger(self.command_name).getChild(_log_name(command))
         return logging.getLogger(_log_name(command))
 
+    @staticmethod
+    def _popen_env(env: dict[str, str] | None) -> dict[str, Any]:
+        """Return the ``Popen`` keyword arguments that export ``env``.
+
+        One place states the merge order: overrides win over the inherited environment, so a
+        hook still sees ``PATH`` and the caller's setup. Nothing is returned without overrides,
+        so the call site keeps its plain-inheritance form.
+        """
+        if env is None:
+            return {}
+        return {"env": {**os.environ, **env}}
+
     def stream_exec(
         self,
         command: list[str],
         cwd: str | Path | None = None,
+        env: dict[str, str] | None = None,
         stream_info: bool = False,
     ) -> int:
         """
         Executes a command in a subprocess and streams its output to stdout.
         :param command: The command to execute as a list of strings
         :param cwd: The working directory to execute the command in
+        :param env: Additional environment variables merged over the inherited environment
         :param stream_info: Whether to mirror output lines to the console at INFO level, indented
             in a gutter so they read as details beneath a step line
         :return: The exit code of the process
@@ -138,6 +153,7 @@ class SubprocessOperator(RuntimeOperator):
             text=True,
             bufsize=1,
             cwd=cwd or self.context.cwd,
+            **self._popen_env(env),
         )
         output_queue, reader_thread = _output_thread(process)
         deadline = time.monotonic() + self.wait_time
