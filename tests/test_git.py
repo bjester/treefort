@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest import TestCase, mock
 
 from treefort.errors import CommandError, WorktreeNameError
-from treefort.git import GitCLI, GitRemote, GitUri
+from treefort.git import GitCLI, GitRemote, GitTreeEntry, GitUri
 from treefort.logger import setup_logger
 
 
@@ -109,6 +109,20 @@ class GitRemoteTestCase(TestCase):
         )
 
 
+class GitTreeEntryTestCase(TestCase):
+    def test_is_executable__true_for_100755(self):
+        entry = GitTreeEntry("100755", "blob", "abc123", ".treefort/templates/script.sh")
+        self.assertTrue(entry.is_executable)
+
+    def test_is_executable__false_for_100644(self):
+        entry = GitTreeEntry("100644", "blob", "abc123", ".treefort/templates/plain.txt")
+        self.assertFalse(entry.is_executable)
+
+    def test_is_executable__false_for_symlink_mode(self):
+        entry = GitTreeEntry("120000", "blob", "abc123", ".treefort/templates/link")
+        self.assertFalse(entry.is_executable)
+
+
 class GitCLITestCase(TestCase):
     def setUp(self):
         self.context = SimpleNamespace(cwd=Path("/test/tmp"))
@@ -170,6 +184,143 @@ class GitCLITestCase(TestCase):
         lines = list(self.cli.cat_file("main", "file.txt"))
         self.mock_iter_output.assert_called_once_with(["cat-file", "-p", "main:file.txt"])
         self.assertEqual(lines, ["content"])
+
+    def test_ls_tree_entries__parses_null_delimited_records(self):
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        mock_process = mock.MagicMock()
+        mock_process.stdout = (
+            "100644 blob aaaa\t.treefort/templates/plain.txt\x00"
+            "100755 blob bbbb\t.treefort/templates/with space.sh\x00"
+        )
+        mock_run.return_value.__enter__.return_value = mock_process
+
+        entries = self.cli.ls_tree_entries("origin/main", ".treefort/templates")
+
+        mock_run.assert_called_once_with(
+            ["ls-tree", "-r", "-z", "origin/main", "--", ".treefort/templates"]
+        )
+        self.assertEqual(
+            entries,
+            [
+                GitTreeEntry("100644", "blob", "aaaa", ".treefort/templates/plain.txt"),
+                GitTreeEntry("100755", "blob", "bbbb", ".treefort/templates/with space.sh"),
+            ],
+        )
+
+    def test_ls_tree_entries__skips_empty_trailing_records(self):
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        mock_process = mock.MagicMock()
+        mock_process.stdout = "100644 blob aaaa\t.treefort/hooks/pre_init\x00\x00"
+        mock_run.return_value.__enter__.return_value = mock_process
+
+        entries = self.cli.ls_tree_entries("main", ".treefort/hooks")
+
+        self.assertEqual(
+            entries, [GitTreeEntry("100644", "blob", "aaaa", ".treefort/hooks/pre_init")]
+        )
+
+    def test_ls_tree_entries__empty_output(self):
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        mock_process = mock.MagicMock()
+        mock_process.stdout = ""
+        mock_run.return_value.__enter__.return_value = mock_process
+
+        self.assertEqual([], self.cli.ls_tree_entries("main", ".treefort/hooks"))
+
+    def test_ls_tree_entries__rejects_malformed_record(self):
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        mock_process = mock.MagicMock()
+        mock_process.stdout = "100644 blob aaaa .treefort/hooks/pre_init\x00"
+        mock_run.return_value.__enter__.return_value = mock_process
+
+        with self.assertRaisesRegex(CommandError, "Unexpected git ls-tree record"):
+            self.cli.ls_tree_entries("main", ".treefort/hooks")
+
+    def test_ls_tree_entries__rejects_leading_dash_ref(self):
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        with self.assertRaisesRegex(CommandError, "Invalid ref"):
+            self.cli.ls_tree_entries("--output=/tmp/pwned", ".treefort/hooks")
+
+        mock_run.assert_not_called()
+
+    def test_ls_tree_entries__translates_called_process_error_with_last_output(self):
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        self.cli.last_output = ["fatal: Not a valid object name missing"]
+        mock_run.return_value.__enter__.side_effect = subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["git", "ls-tree", "-r", "-z", "missing", "--", ".treefort/hooks"],
+        )
+
+        with self.assertRaises(CommandError) as ctx:
+            self.cli.ls_tree_entries("missing", ".treefort/hooks")
+
+        self.assertIn(
+            "Command failed, with exit status 128: git ls-tree -r -z missing -- .treefort/hooks",
+            str(ctx.exception),
+        )
+        self.assertIn("fatal: Not a valid object name missing", str(ctx.exception))
+
+    def test_read_blob__returns_raw_bytes(self):
+        payload = b"\x89PNG\r\n\x1a\n\x00\x00binary\xff"
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        mock_process = mock.MagicMock()
+        mock_process.stdout = payload
+        mock_run.return_value.__enter__.return_value = mock_process
+
+        content = self.cli.read_blob("abc123")
+
+        mock_run.assert_called_once_with(["cat-file", "blob", "abc123"], text=False)
+        self.assertEqual(content, payload)
+
+    def test_read_blob__rejects_leading_dash_sha(self):
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        with self.assertRaisesRegex(CommandError, "Invalid object name"):
+            self.cli.read_blob("--stdin")
+
+        mock_run.assert_not_called()
+
+    def test_read_blob__translates_called_process_error_with_last_output(self):
+        run_patcher = mock.patch("treefort.git.SubprocessOperator.run")
+        mock_run = run_patcher.start()
+        self.addCleanup(run_patcher.stop)
+
+        self.cli.last_output = ["fatal: Not a valid object name missing"]
+        mock_run.return_value.__enter__.side_effect = subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["git", "cat-file", "blob", "missing"],
+        )
+
+        with self.assertRaises(CommandError) as ctx:
+            self.cli.read_blob("missing")
+
+        self.assertIn(
+            "Command failed, with exit status 128: git cat-file blob missing", str(ctx.exception)
+        )
+        self.assertIn("fatal: Not a valid object name missing", str(ctx.exception))
 
     def test_fetch(self):
         self.cli.fetch()

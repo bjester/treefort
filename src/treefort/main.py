@@ -8,6 +8,7 @@ from treefort.commands.prune import PruneCommand
 from treefort.commands.remove import RemoveCommand
 from treefort.commands.shell_init import ShellInitCommand
 from treefort.commands.switch import SwitchCommand
+from treefort.commands.sync import SyncCommand
 from treefort.runtime import Runtime
 
 
@@ -27,6 +28,7 @@ class WorktreeCommands(Command):
         PruneCommand,
         ShellInitCommand,
         SwitchCommand,
+        SyncCommand,
     )
 
     def __init__(self, verbose: bool = False):

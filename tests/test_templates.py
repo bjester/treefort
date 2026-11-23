@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from treefort.errors import ValidationError
+from treefort.git import GitTreeEntry
 from treefort.templates import TemplateExists, Templates
 
 
@@ -307,3 +309,134 @@ class TemplatesTestCase(unittest.TestCase):
         with self.assertRaisesRegex(TemplateExists, "Template .* already exists"):
             with templates.add(relative_path) as f:
                 f.write("new")
+
+    def sync_setup(self):
+        """Return a Templates instance and a mocked GitCLI for sync tests."""
+        context = self._create_context()
+        templates = Templates(context, Mock())
+        git = Mock()
+        git.ls_tree_entries.return_value = []
+        git.read_blob.return_value = b""
+        return templates, git
+
+    def entry(self, path, mode="100644", obj_type="blob", sha="abc123"):
+        return GitTreeEntry(mode, obj_type, sha, path)
+
+    def test_sync_from_git__writes_binary_content_byte_for_byte(self):
+        templates, git = self.sync_setup()
+        payload = b"\x89PNG\r\n\x1a\n\x00\x00\xff\xfe"
+        git.ls_tree_entries.return_value = [self.entry(".treefort/templates/logo.png")]
+        git.read_blob.return_value = payload
+
+        synced = templates.sync_from_git(git, "origin/main")
+
+        template_file = self.project_templates_dir / "logo.png"
+        self.assertEqual(1, synced)
+        self.assertEqual(payload, template_file.read_bytes())
+        git.ls_tree_entries.assert_called_once_with("origin/main", ".treefort/templates")
+        git.read_blob.assert_called_once_with("abc123")
+
+    def test_sync_from_git__preserves_executable_and_plain_modes(self):
+        templates, git = self.sync_setup()
+        git.ls_tree_entries.return_value = [
+            self.entry(".treefort/templates/script.sh", "100755"),
+            self.entry(".treefort/templates/config.toml", "100644"),
+        ]
+        git.read_blob.return_value = b"content"
+
+        synced = templates.sync_from_git(git, "origin/main")
+
+        self.assertEqual(2, synced)
+        self.assertEqual(0o755, (self.project_templates_dir / "script.sh").stat().st_mode & 0o777)
+        self.assertEqual(0o644, (self.project_templates_dir / "config.toml").stat().st_mode & 0o777)
+
+    def test_sync_from_git__creates_nested_directories(self):
+        templates, git = self.sync_setup()
+        git.ls_tree_entries.return_value = [self.entry(".treefort/templates/deep/nested/file.txt")]
+        git.read_blob.return_value = b"nested"
+
+        synced = templates.sync_from_git(git, "origin/main")
+
+        self.assertEqual(1, synced)
+        self.assertEqual(
+            b"nested", (self.project_templates_dir / "deep" / "nested" / "file.txt").read_bytes()
+        )
+
+    def test_sync_from_git__overwrite_false_skips_existing_file(self):
+        templates, git = self.sync_setup()
+        git.ls_tree_entries.return_value = [self.entry(".treefort/templates/env.txt")]
+        git.read_blob.return_value = b"upstream"
+
+        synced = templates.sync_from_git(git, "origin/main", overwrite=False)
+
+        self.assertEqual(0, synced)
+        self.assertEqual(
+            "PATH: $WORKTREE_DIR\nUSER: $USER\n",
+            (self.project_templates_dir / "env.txt").read_text(),
+        )
+        git.read_blob.assert_not_called()
+        templates.logger.warning.assert_called_once()
+        self.assertIn("already exists", templates.logger.warning.call_args.args[0])
+
+    def test_sync_from_git__overwrite_true_replaces_existing_file(self):
+        templates, git = self.sync_setup()
+        git.ls_tree_entries.return_value = [self.entry(".treefort/templates/env.txt")]
+        git.read_blob.return_value = b"upstream"
+
+        synced = templates.sync_from_git(git, "origin/main")
+
+        self.assertEqual(1, synced)
+        self.assertEqual(b"upstream", (self.project_templates_dir / "env.txt").read_bytes())
+
+    def test_sync_from_git__skips_symlink_and_non_blob_entries(self):
+        templates, git = self.sync_setup()
+        git.ls_tree_entries.return_value = [
+            self.entry(".treefort/templates/link", "120000"),
+            self.entry(".treefort/templates/tree", obj_type="tree"),
+        ]
+
+        synced = templates.sync_from_git(git, "origin/main")
+
+        self.assertEqual(0, synced)
+        git.read_blob.assert_not_called()
+
+    def test_sync_from_git__raises_validation_error_on_parent_traversal(self):
+        templates, git = self.sync_setup()
+        git.ls_tree_entries.return_value = [self.entry(".treefort/templates/../../evil")]
+
+        with self.assertRaises(ValidationError):
+            templates.sync_from_git(git, "origin/main")
+
+        self.assertFalse((self.project_dir / "evil").exists())
+        git.read_blob.assert_not_called()
+
+    def test_sync_from_git__raises_validation_error_on_empty_relative_path(self):
+        templates, git = self.sync_setup()
+        git.ls_tree_entries.return_value = [self.entry(".treefort/templates/")]
+
+        with self.assertRaises(ValidationError):
+            templates.sync_from_git(git, "origin/main")
+
+        git.read_blob.assert_not_called()
+
+    def test_sync_from_git__reports_a_local_file_blocking_a_new_directory(self):
+        templates, git = self.sync_setup()
+        (self.project_templates_dir / "foo").write_bytes(b"stale file")
+        git.ls_tree_entries.return_value = [self.entry(".treefort/templates/foo/bar.txt")]
+        git.read_blob.return_value = b"new"
+
+        with self.assertRaisesRegex(ValidationError, "local file or directory is in the way"):
+            templates.sync_from_git(git, "origin/main")
+
+        self.assertEqual(b"stale file", (self.project_templates_dir / "foo").read_bytes())
+
+    def test_sync_from_git__reports_a_local_directory_blocking_a_new_file(self):
+        templates, git = self.sync_setup()
+        (self.project_templates_dir / "foo").mkdir()
+        git.ls_tree_entries.return_value = [self.entry(".treefort/templates/foo")]
+        git.read_blob.return_value = b"new"
+
+        with self.assertRaisesRegex(ValidationError, "local file or directory is in the way"):
+            templates.sync_from_git(git, "origin/main")
+
+        self.assertTrue((self.project_templates_dir / "foo").is_dir())

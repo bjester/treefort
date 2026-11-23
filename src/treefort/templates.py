@@ -6,8 +6,11 @@ from string import Template
 
 from treefort import ui
 from treefort.context import Context
+from treefort.git import TREE_FILE_MODES, GitCLI
 from treefort.operator import ConfigOperator
-from treefort.utils import normalize_worktree_name
+from treefort.utils import normalize_worktree_name, resolve_contained, write_bytes_atomically
+
+GIT_TEMPLATES_DIR = ".treefort/templates"
 
 
 class TemplateExists(Exception):
@@ -82,3 +85,35 @@ class Templates(ConfigOperator):
         # copy it to config
         with template_file.open("w", encoding="utf-8") as f:
             yield f
+
+    def sync_from_git(self, git: GitCLI, ref: str, overwrite: bool = True) -> int:
+        """
+        Synchronize the project templates tracked in a Git ref into the configuration directory.
+
+        Blobs are written undecoded, so binary templates survive byte for byte, and the mode
+        recorded in the Git tree decides whether the file is executable.
+        :param git: The Git CLI used to read the tree entries and blobs
+        :param ref: The Git ref to read the templates from
+        :param overwrite: Whether to replace templates that already exist on disk
+        :return: The number of templates written
+        """
+        templates_dir = self.context.config_dir / self.dir_name
+        synced = 0
+
+        for entry in git.ls_tree_entries(ref, GIT_TEMPLATES_DIR):
+            if entry.obj_type != "blob" or entry.mode not in TREE_FILE_MODES:
+                continue
+            if not entry.path.startswith(f"{GIT_TEMPLATES_DIR}/"):
+                continue
+
+            rel_path = entry.path.removeprefix(f"{GIT_TEMPLATES_DIR}/")
+            dest = resolve_contained(templates_dir, rel_path)
+            if not overwrite and dest.exists():
+                self.logger.warning(f"Template {dest} already exists. Skipping.")
+                continue
+
+            mode = 0o755 if entry.is_executable else 0o644
+            write_bytes_atomically(dest, git.read_blob(entry.sha), mode)
+            synced += 1
+
+        return synced

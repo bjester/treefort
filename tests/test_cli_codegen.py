@@ -422,6 +422,7 @@ class BuildManifestTestCase(TestCase):
                 "remove",
                 "shell-init",
                 "switch",
+                "sync",
                 "version",
             ],
             sorted(manifest.commands),

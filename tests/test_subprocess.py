@@ -170,6 +170,41 @@ class SubprocessOperatorTestCase(TestCase):
         )
 
     @mock.patch("treefort.subprocess.subprocess.run")
+    def test_run__passes_text_false_for_binary_callers(self, mock_run):
+        result_mock = Mock(spec=subprocess.CompletedProcess, stdout=b"\x00\xff", returncode=0)
+        mock_run.return_value = result_mock
+
+        with self.operator.run(["cat-file", "blob", "abc"], text=False) as output:
+            self.assertEqual(b"\x00\xff", output.stdout)
+
+        mock_run.assert_called_once_with(
+            ["test_command", "cat-file", "blob", "abc"],
+            capture_output=True,
+            text=False,
+            check=True,
+            timeout=60,
+            cwd=self.tmp_path,
+        )
+
+    @mock.patch("treefort.subprocess.subprocess.run")
+    def test_run__decodes_binary_output_into_last_output_on_failure(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(
+            returncode=128,
+            cmd=["test_command", "cat-file", "blob", "abc"],
+            output=b"binary\xffdata\n",
+            stderr=b"fatal: Not a valid object name abc\n",
+        )
+
+        with self.assertRaises(subprocess.CalledProcessError):
+            with self.operator.run(["cat-file", "blob", "abc"], text=False):
+                pass
+
+        self.assertEqual(
+            ["binary\ufffddata", "fatal: Not a valid object name abc"],
+            list(self.operator.last_output),
+        )
+
+    @mock.patch("treefort.subprocess.subprocess.run")
     def test_run__records_stdout_then_stderr_into_last_output_on_failure(self, mock_run):
         stdout_lines = "".join(f"stdout-{i}\n" for i in range(25))
         mock_run.side_effect = subprocess.CalledProcessError(

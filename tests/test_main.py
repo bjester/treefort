@@ -18,7 +18,17 @@ class WorktreeCommandsTestCase(TestCase):
 
     def test_init__instantiates_every_declared_command_class(self):
         self.assertEqual(
-            ["create", "checkout", "init", "install", "remove", "prune", "shell-init", "switch"],
+            [
+                "create",
+                "checkout",
+                "init",
+                "install",
+                "remove",
+                "prune",
+                "shell-init",
+                "switch",
+                "sync",
+            ],
             [command._name for command in self.commands._commands],
         )
 
