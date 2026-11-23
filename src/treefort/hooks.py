@@ -22,20 +22,25 @@ GIT_HOOKS_DIR = ".treefort/hooks"
 
 # A hook is a user-authored script running with the user's own privileges, so withholding a
 # variable is not a security boundary. It keeps the contract honest instead: a hook sees the
-# variables treefort exports for it plus what a shell script needs to find its tools, never a
-# stale ``TREEFORT_*`` value that an outer hook or a hand-run export left in the caller.
+# variables treefort exports for it plus what a shell script needs to find its tools and reach
+# the network, never a stale ``TREEFORT_*`` value that an outer hook or a hand-run export left
+# in the caller.
 HOOK_ENV_PASSTHROUGH = frozenset(
     {
         "HOME",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
         "LANG",
         "LC_ALL",
         "LC_CTYPE",
         "LOGNAME",
+        "NO_PROXY",
         "PATH",
         "SHELL",
         "TERM",
         "TMPDIR",
         "USER",
+        "XDG_CONFIG_HOME",
     }
 )
 

@@ -132,17 +132,20 @@ class HookEnvironmentIntegrationTestCase(LocalRepoIntegrationTestCase):
         hook_file.write_text(
             "#!/bin/sh\n"
             f'printf \'%s\\n\' "${{PATH-unset}}" "${{HOME-unset}}" '
+            f'"${{XDG_CONFIG_HOME-unset}}" '
             f"\"${{GITHUB_TOKEN-unset}}\" > '{output_file}'\n",
             encoding="utf-8",
         )
         hook_file.chmod(0o755)
 
-        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "secret-token"}):
+        environ = {"GITHUB_TOKEN": "secret-token", "XDG_CONFIG_HOME": "/home/dev/.config"}
+        with mock.patch.dict(os.environ, environ):
             HookCommand(self.runtime)("pre_init", yes=True)
 
-        path, home, token = output_file.read_text(encoding="utf-8").splitlines()
+        path, home, xdg_config_home, token = output_file.read_text(encoding="utf-8").splitlines()
         self.assertNotEqual("unset", path)
         self.assertEqual(str(self.home_dir), home)
+        self.assertEqual("/home/dev/.config", xdg_config_home)
         self.assertEqual("unset", token)
 
     def test_hook_command__list_reports_the_real_approval_status(self):

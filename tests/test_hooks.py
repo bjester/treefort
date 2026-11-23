@@ -11,6 +11,7 @@ from treefort.context import Context
 from treefort.errors import HookError, HookExistsError, ValidationError, WorktreeNotFoundError
 from treefort.git import GitTreeEntry
 from treefort.hooks import (
+    HOOK_ENV_PASSTHROUGH,
     HOOKS,
     POST_CHECKOUT,
     POST_CREATE,
@@ -219,6 +220,8 @@ class HooksTestCase(TestCase):
         environ = {
             "PATH": "/bin",
             "HOME": str(self.home_dir),
+            "HTTPS_PROXY": "http://proxy:3128",
+            "XDG_CONFIG_HOME": "/home/dev/.config",
             "GITHUB_TOKEN": "secret",
         }
         with mock.patch.dict(os.environ, environ, clear=True):
@@ -227,8 +230,32 @@ class HooksTestCase(TestCase):
         env = mock_stream_exec.call_args.kwargs["env"]
         self.assertEqual("/bin", env["PATH"])
         self.assertEqual(str(self.home_dir), env["HOME"])
+        self.assertEqual("http://proxy:3128", env["HTTPS_PROXY"])
+        self.assertEqual("/home/dev/.config", env["XDG_CONFIG_HOME"])
         self.assertNotIn("GITHUB_TOKEN", env)
         self.assertIs(False, mock_stream_exec.call_args.kwargs["inherit_env"])
+
+    def test_passthrough_env__covers_the_documented_standard_variables(self):
+        # The README lists this set, so changing it is a documentation change too
+        self.assertEqual(
+            {
+                "HOME",
+                "HTTP_PROXY",
+                "HTTPS_PROXY",
+                "LANG",
+                "LC_ALL",
+                "LC_CTYPE",
+                "LOGNAME",
+                "NO_PROXY",
+                "PATH",
+                "SHELL",
+                "TERM",
+                "TMPDIR",
+                "USER",
+                "XDG_CONFIG_HOME",
+            },
+            set(HOOK_ENV_PASSTHROUGH),
+        )
 
     def test_build_env__pre_init_without_arguments(self):
         self.assertEqual(
