@@ -119,13 +119,13 @@ class SubprocessOperator(RuntimeOperator):
         One place states the merge order: overrides win over the inherited environment, so a
         child process still sees ``PATH`` and the caller's setup. ``inherit_env`` set to
         ``False`` exports ``env`` alone, which lets a caller decide exactly what a child sees.
-        Nothing is returned without overrides, so the call site keeps its plain-inheritance
-        form.
+        Without overrides, nothing is returned and the call site keeps its plain-inheritance
+        form, unless inheritance was turned off.
         """
+        if not inherit_env:
+            return {"env": dict(env or {})}
         if env is None:
             return {}
-        if not inherit_env:
-            return {"env": dict(env)}
         return {"env": {**os.environ, **env}}
 
     def stream_exec(

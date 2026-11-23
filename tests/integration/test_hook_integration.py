@@ -104,7 +104,7 @@ class HookEnvironmentIntegrationTestCase(LocalRepoIntegrationTestCase):
         # The clone does not exist yet, so these are unset rather than empty
         self.assertEqual(["unset"] * 5, lines[3:8])
 
-    def test_hook_command__withholds_a_trefort_variable_left_in_the_environment(self):
+    def test_hook_command__withholds_a_treefort_variable_left_in_the_environment(self):
         # A hook that runs `treefort remove`, or a hook author who exports the variables to try
         # a script by hand, leaves its own context in the caller's environment. The hook below
         # must still see those slots as unset.

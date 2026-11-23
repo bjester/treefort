@@ -114,6 +114,22 @@ class SubprocessOperatorTestCase(TestCase):
         )
 
     @mock.patch("treefort.subprocess.subprocess.Popen")
+    def test_stream_exec__exports_an_empty_env_when_inheritance_is_disabled(self, mock_popen):
+        # Turning inheritance off without overrides must still withhold the environment, or the
+        # child inherits everything the caller asked to drop
+        process_mock = MagicMock()
+        process_mock.stdout = []
+        process_mock.returncode = 0
+        process_mock.pid = 123
+        process_mock.poll.return_value = 0
+        mock_popen.return_value = process_mock
+
+        with mock.patch.dict(os.environ, {"PATH": "/bin", "LEAKED": "1"}, clear=True):
+            self.operator.stream_exec(["do-something"], inherit_env=False)
+
+        self.assertEqual({}, mock_popen.call_args.kwargs["env"])
+
+    @mock.patch("treefort.subprocess.subprocess.Popen")
     def test_stream_exec__omits_env_when_not_provided(self, mock_popen):
         process_mock = MagicMock()
         process_mock.stdout = []

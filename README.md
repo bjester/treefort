@@ -136,9 +136,10 @@ above plus these standard variables:
 `SHELL`, `TERM`, `TMPDIR`, `USER`, `XDG_CONFIG_HOME`, `http_proxy`, `https_proxy`, `no_proxy`.
 
 Proxy variables are passed in both cases because curl and git accept only the lowercase
-`http_proxy`. A `TREEFORT_*` value left in the caller's environment never reaches a hook, so a
-hook that runs `treefort` cannot pass its own context to the next one. Any other variable a hook
-needs must be set by the hook itself.
+`http_proxy`. `SSH_AUTH_SOCK` is not passed, so a hook that fetches over SSH needs a key it can
+read from disk rather than one held only in an agent. A `TREEFORT_*` value left in the caller's
+environment never reaches a hook, so a hook that runs `treefort` cannot pass its own context to
+the next one. Any other variable a hook needs must be set by the hook itself.
 
 <details>
 <summary><strong>Example: post_create hook</strong></summary>
