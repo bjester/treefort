@@ -260,6 +260,15 @@ class HooksSyncFromGitTestCase(TestCase):
         self.assertEqual(0, synced)
         self.git.read_blob.assert_not_called()
 
+    def test_sync_from_git__skips_a_name_that_starts_with_dots(self):
+        self.git.ls_tree_entries.return_value = [self.entry(".treefort/hooks/..foo")]
+
+        synced = self.hooks.sync_from_git(self.git, "origin/main")
+
+        self.assertEqual(0, synced)
+        self.git.read_blob.assert_not_called()
+        self.assertFalse(self.hooks_path.exists())
+
     def test_sync_from_git__raises_validation_error_on_parent_traversal(self):
         self.git.ls_tree_entries.return_value = [self.entry(".treefort/hooks/../evil")]
 

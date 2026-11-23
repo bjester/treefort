@@ -6,10 +6,9 @@ from string import Template
 
 from treefort import ui
 from treefort.context import Context
-from treefort.errors import ValidationError
 from treefort.git import TREE_FILE_MODES, GitCLI
 from treefort.operator import ConfigOperator
-from treefort.utils import normalize_worktree_name, write_bytes_atomically
+from treefort.utils import normalize_worktree_name, resolve_contained, write_bytes_atomically
 
 GIT_TEMPLATES_DIR = ".treefort/templates"
 
@@ -108,7 +107,7 @@ class Templates(ConfigOperator):
                 continue
 
             rel_path = entry.path.removeprefix(f"{GIT_TEMPLATES_DIR}/")
-            dest = self._resolve_dest(templates_dir, rel_path, entry.path)
+            dest = resolve_contained(templates_dir, rel_path)
             if not overwrite and dest.exists():
                 self.logger.warning(f"Template {dest} already exists. Skipping.")
                 continue
@@ -118,23 +117,3 @@ class Templates(ConfigOperator):
             synced += 1
 
         return synced
-
-    def _resolve_dest(self, templates_dir: Path, rel_path: str, git_path: str) -> Path:
-        """
-        Resolve a template entry to its destination, refusing any path outside the templates
-        directory.
-        :param templates_dir: The directory templates are extracted into
-        :param rel_path: The entry path relative to the Git templates directory
-        :param git_path: The full entry path, for diagnostics
-        :return: The destination path for the template
-        """
-        resolved_dir = templates_dir.resolve()
-        dest = templates_dir / rel_path
-        resolved_dest = dest.resolve()
-        if (
-            not rel_path
-            or resolved_dest == resolved_dir
-            or not resolved_dest.is_relative_to(resolved_dir)
-        ):
-            raise ValidationError(f"Template path escapes {templates_dir}: {git_path}")
-        return dest

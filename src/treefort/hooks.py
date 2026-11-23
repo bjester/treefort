@@ -8,11 +8,11 @@ from pathlib import Path
 
 from treefort import ui
 from treefort.context import Context
-from treefort.errors import HookError, HookExistsError, ValidationError
+from treefort.errors import HookError, HookExistsError
 from treefort.git import TREE_FILE_MODES, GitCLI
 from treefort.operator import ConfigOperator
 from treefort.subprocess import SubprocessOperator
-from treefort.utils import write_bytes_atomically
+from treefort.utils import resolve_contained, write_bytes_atomically
 
 GIT_HOOKS_DIR = ".treefort/hooks"
 
@@ -161,7 +161,7 @@ class Hooks(ConfigOperator, SubprocessOperator):
                 continue
 
             rel_path = entry.path.removeprefix(f"{GIT_HOOKS_DIR}/")
-            dest = self._resolve_dest(hooks_dir, rel_path, entry.path)
+            dest = resolve_contained(hooks_dir, rel_path)
             if "/" in rel_path or rel_path not in Hook.__members__:
                 continue
             if not overwrite and dest.exists():
@@ -172,16 +172,3 @@ class Hooks(ConfigOperator, SubprocessOperator):
             synced += 1
 
         return synced
-
-    def _resolve_dest(self, hooks_dir: Path, rel_path: str, git_path: str) -> Path:
-        """
-        Resolve a hook entry to its destination, refusing any path that escapes the hooks directory.
-        :param hooks_dir: The directory hooks are extracted into
-        :param rel_path: The entry path relative to the Git hooks directory
-        :param git_path: The full entry path, for diagnostics
-        :return: The destination path for the hook
-        """
-        dest = hooks_dir / rel_path
-        if rel_path.startswith("..") or not dest.resolve().is_relative_to(hooks_dir.resolve()):
-            raise ValidationError(f"Hook path escapes {hooks_dir}: {git_path}")
-        return dest

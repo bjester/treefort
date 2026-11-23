@@ -418,3 +418,25 @@ class TemplatesTestCase(unittest.TestCase):
             templates.sync_from_git(git, "origin/main")
 
         git.read_blob.assert_not_called()
+
+    def test_sync_from_git__reports_a_local_file_blocking_a_new_directory(self):
+        templates, git = self.sync_setup()
+        (self.project_templates_dir / "foo").write_bytes(b"stale file")
+        git.ls_tree_entries.return_value = [self.entry(".treefort/templates/foo/bar.txt")]
+        git.read_blob.return_value = b"new"
+
+        with self.assertRaisesRegex(ValidationError, "local file or directory is in the way"):
+            templates.sync_from_git(git, "origin/main")
+
+        self.assertEqual(b"stale file", (self.project_templates_dir / "foo").read_bytes())
+
+    def test_sync_from_git__reports_a_local_directory_blocking_a_new_file(self):
+        templates, git = self.sync_setup()
+        (self.project_templates_dir / "foo").mkdir()
+        git.ls_tree_entries.return_value = [self.entry(".treefort/templates/foo")]
+        git.read_blob.return_value = b"new"
+
+        with self.assertRaisesRegex(ValidationError, "local file or directory is in the way"):
+            templates.sync_from_git(git, "origin/main")
+
+        self.assertTrue((self.project_templates_dir / "foo").is_dir())

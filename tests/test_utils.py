@@ -3,8 +3,13 @@ from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
-from treefort.errors import AncestorNotFoundError
-from treefort.utils import find_up, normalize_worktree_name, write_bytes_atomically
+from treefort.errors import AncestorNotFoundError, ValidationError
+from treefort.utils import (
+    find_up,
+    normalize_worktree_name,
+    resolve_contained,
+    write_bytes_atomically,
+)
 
 
 class FindUpTestCase(TestCase):
@@ -120,3 +125,63 @@ class WriteBytesAtomicallyTestCase(TestCase):
 
         self.assertEqual(b"before", dest.read_bytes())
         self.assertEqual([dest], list(self.tmp_path.iterdir()))
+
+    def test_write_bytes_atomically__reports_a_file_blocking_a_directory(self):
+        blocker = self.tmp_path / "blocker"
+        blocker.write_bytes(b"i am a file")
+
+        with self.assertRaisesRegex(ValidationError, "local file or directory is in the way"):
+            write_bytes_atomically(blocker / "nested" / "file.txt", b"content", 0o644)
+
+        self.assertEqual(b"i am a file", blocker.read_bytes())
+
+    def test_write_bytes_atomically__reports_a_directory_blocking_a_file(self):
+        blocker = self.tmp_path / "blocker"
+        blocker.mkdir()
+        (blocker / "keep.txt").write_bytes(b"kept")
+
+        with self.assertRaisesRegex(ValidationError, "local file or directory is in the way"):
+            write_bytes_atomically(blocker, b"content", 0o644)
+
+        self.assertTrue(blocker.is_dir())
+        self.assertEqual(b"kept", (blocker / "keep.txt").read_bytes())
+        self.assertEqual([blocker], list(self.tmp_path.iterdir()))
+
+
+class ResolveContainedTestCase(TestCase):
+    def setUp(self):
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp_dir.name)
+        self.base_dir = self.tmp_path / "base"
+        self.base_dir.mkdir()
+
+    def tearDown(self):
+        self.tmp_dir.cleanup()
+
+    def test_resolve_contained__returns_a_direct_child(self):
+        self.assertEqual(self.base_dir / "file.txt", resolve_contained(self.base_dir, "file.txt"))
+
+    def test_resolve_contained__permits_nested_paths(self):
+        self.assertEqual(
+            self.base_dir / "deep" / "nested" / "file.txt",
+            resolve_contained(self.base_dir, "deep/nested/file.txt"),
+        )
+
+    def test_resolve_contained__permits_a_name_that_starts_with_dots(self):
+        self.assertEqual(self.base_dir / "..foo", resolve_contained(self.base_dir, "..foo"))
+
+    def test_resolve_contained__rejects_an_empty_path(self):
+        with self.assertRaisesRegex(ValidationError, "escapes"):
+            resolve_contained(self.base_dir, "")
+
+    def test_resolve_contained__rejects_the_base_directory_itself(self):
+        with self.assertRaisesRegex(ValidationError, "escapes"):
+            resolve_contained(self.base_dir, ".")
+
+    def test_resolve_contained__rejects_a_parent_traversal(self):
+        with self.assertRaisesRegex(ValidationError, "escapes"):
+            resolve_contained(self.base_dir, "../evil")
+
+    def test_resolve_contained__rejects_a_nested_traversal(self):
+        with self.assertRaisesRegex(ValidationError, "escapes"):
+            resolve_contained(self.base_dir, "nested/../../evil")
