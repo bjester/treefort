@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from treefort.cli_manifest import CommandSpec, ParamSpec
 from treefort.command import Completion
-from treefort.hooks import Hook
+from treefort.hooks import HOOKS
 from treefort.shells import (
     CMD_PLACEHOLDER,
     DEFAULT_CMD_NAME,
@@ -211,7 +211,7 @@ COMMANDS = {
     "sync": SYNC,
 }
 ALIAS_MAP = {"rm": "remove"}
-HOOK_WORDS = ["list", *(hook.name for hook in Hook)]
+HOOK_WORDS = ["list", *HOOKS]
 
 
 class ShellsTestCase(TestCase):
@@ -385,7 +385,7 @@ class ShellsTestCase(TestCase):
         words = self.bash(["treefort", "shell-init", "bash", ""], 3)
 
         self.assertIn("list", words)
-        for hook in Hook:
+        for hook in HOOKS.values():
             self.assertIn(hook.name, words)
 
     def test_bash_completion_script__uses_the_command_placeholder(self):

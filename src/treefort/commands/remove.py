@@ -5,7 +5,7 @@ from treefort import ui
 from treefort.command import Arg, Command, Completion, command
 from treefort.errors import CommandError, WorktreeNotFoundError
 from treefort.git import LOCAL_BRANCH_REF_PREFIX
-from treefort.hooks import Hook
+from treefort.hooks import POST_REMOVE, PRE_REMOVE
 from treefort.utils import normalize_worktree_name
 
 
@@ -20,6 +20,7 @@ class RemoveCommand(Command):
         force: Annotated[bool, Arg(short="-f")] = False,
         yes: Annotated[bool, Arg(short="-y")] = False,
         delete_branch: Annotated[bool, Arg(short="-d")] = False,
+        no_hooks: bool = False,
     ):
         """
         Remove a worktree from the current project that was added with `create` or `checkout`.
@@ -38,6 +39,7 @@ class RemoveCommand(Command):
             (execute new or modified hooks)
         :param delete_branch: Whether to also delete the local Git branch associated with the
             worktree, which is not necessarily named after the worktree directory
+        :param no_hooks: Skip every hook without prompting or running anything
         """
         project_dir = self._context.project_dir
         worktree_path = project_dir / worktree_name
@@ -49,7 +51,11 @@ class RemoveCommand(Command):
 
         with self._context.use(project_dir, end_at=project_dir):
             self._runtime.hooks.fire(
-                Hook.pre_remove, worktree_name, normalized_name, bypass_allowlist=yes
+                PRE_REMOVE,
+                worktree_name,
+                normalized_name,
+                bypass_allowlist=yes,
+                no_hooks=no_hooks,
             )
 
             if delete_branch:
@@ -73,7 +79,11 @@ class RemoveCommand(Command):
                         deleted_branch = branch_name
 
             self._runtime.hooks.fire(
-                Hook.post_remove, worktree_name, normalized_name, bypass_allowlist=yes
+                POST_REMOVE,
+                worktree_name,
+                normalized_name,
+                bypass_allowlist=yes,
+                no_hooks=no_hooks,
             )
 
             self._logger.info(ui.success(f"Removed worktree {ui.bold(worktree_name)}"))

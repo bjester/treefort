@@ -8,7 +8,7 @@ from typing import Literal
 
 from treefort.cli_manifest import CommandSpec, ParamSpec
 from treefort.command import Completion
-from treefort.hooks import Hook
+from treefort.hooks import HOOKS
 
 CMD_PLACEHOLDER = "__CMD__"
 GLOBAL_FLAGS = ("-h", "--help", "-v", "--verbose")
@@ -81,7 +81,7 @@ def candidate_source(param: ParamSpec) -> CandidateSource | None:
     if provider == Completion.NONE.value:
         return None
     if provider == Completion.HOOK.value:
-        return CandidateSource(kind="words", words=("list",) + tuple(hook.name for hook in Hook))
+        return CandidateSource(kind="words", words=("list",) + tuple(HOOKS))
     return CandidateSource(kind="provider", provider=provider)
 
 

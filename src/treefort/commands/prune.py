@@ -5,7 +5,7 @@ from typing import Annotated
 from treefort.command import Arg, Command, command
 from treefort.errors import CommandError
 from treefort.git import LOCAL_BRANCH_REF_PREFIX
-from treefort.hooks import Hook
+from treefort.hooks import POST_REMOVE, PRE_REMOVE
 from treefort.utils import normalize_worktree_name
 
 
@@ -27,6 +27,7 @@ class PruneCommand(Command):
         *,
         force: Annotated[bool, Arg(short="-f")] = False,
         yes: Annotated[bool, Arg(short="-y")] = False,
+        no_hooks: bool = False,
     ):
         """
         Prune worktrees whose associated PRs have been merged.
@@ -41,6 +42,7 @@ class PruneCommand(Command):
 
         :param force: Whether to bypass git safety checks when removing the worktree
         :param yes: Perform any action automatically without asking (execute new or modified hooks)
+        :param no_hooks: Skip every hook without prompting or running anything
         """
         self._context.assert_within_project()
 
@@ -57,7 +59,7 @@ class PruneCommand(Command):
                     self._logger.info(f"Skipping '{candidate.worktree_name}'")
                     continue
 
-            if self._do_prune(candidate, force, yes):
+            if self._do_prune(candidate, force, yes, no_hooks=no_hooks):
                 pruned_count += 1
             else:
                 failed_count += 1
@@ -119,7 +121,9 @@ class PruneCommand(Command):
 
             yield PruneCandidate(worktree_name, branch_name, local_head)
 
-    def _do_prune(self, candidate: PruneCandidate, force: bool, yes: bool) -> bool:
+    def _do_prune(
+        self, candidate: PruneCandidate, force: bool, yes: bool, no_hooks: bool = False
+    ) -> bool:
         """
         Executes the prune operation, firing the hooks before and after.
 
@@ -133,10 +137,11 @@ class PruneCommand(Command):
             normalized_name = normalize_worktree_name(candidate.worktree_name)
             with self._context.use(project_dir, end_at=project_dir):
                 self._runtime.hooks.fire(
-                    Hook.pre_remove,
+                    PRE_REMOVE,
                     candidate.worktree_name,
                     normalized_name,
                     bypass_allowlist=yes,
+                    no_hooks=no_hooks,
                 )
 
                 self._runtime.git.remove_worktree(candidate.worktree_name, force=force)
@@ -145,10 +150,11 @@ class PruneCommand(Command):
                 )
 
                 self._runtime.hooks.fire(
-                    Hook.post_remove,
+                    POST_REMOVE,
                     candidate.worktree_name,
                     normalized_name,
                     bypass_allowlist=yes,
+                    no_hooks=no_hooks,
                 )
 
             self._logger.info(f"Successfully pruned '{candidate.worktree_name}'")

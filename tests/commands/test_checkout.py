@@ -10,7 +10,7 @@ from treefort.command import Arg, Completion
 from treefort.commands.checkout import CheckoutCommand, CheckoutInput
 from treefort.errors import BranchInputError, CommandError, RemoteNotFoundError
 from treefort.git import GitRemote
-from treefort.hooks import Hook
+from treefort.hooks import POST_CHECKOUT, PRE_CHECKOUT
 
 
 class StubContext:
@@ -130,10 +130,10 @@ class CheckoutCommandTestCase(TestCase):
         self.git.open_worktree.assert_called_once_with("feature")
         self.templates.copy.assert_called_once_with("feature")
         self.hooks.fire.assert_any_call(
-            Hook.pre_checkout, "feature", ANY, "feature", bypass_allowlist=False
+            PRE_CHECKOUT, "feature", ANY, "feature", bypass_allowlist=False, no_hooks=False
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_checkout, "feature", ANY, "feature", bypass_allowlist=False
+            POST_CHECKOUT, "feature", ANY, "feature", bypass_allowlist=False, no_hooks=False
         )
 
     def test_call__uses_a_hyphenated_branch_name(self):
@@ -151,10 +151,10 @@ class CheckoutCommandTestCase(TestCase):
         self.git.open_worktree.assert_called_once_with("feature")
         self.templates.copy.assert_called_once_with("feature")
         self.hooks.fire.assert_any_call(
-            Hook.pre_checkout, "feature", ANY, "feature", bypass_allowlist=False
+            PRE_CHECKOUT, "feature", ANY, "feature", bypass_allowlist=False, no_hooks=False
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_checkout, "feature", ANY, "feature", bypass_allowlist=False
+            POST_CHECKOUT, "feature", ANY, "feature", bypass_allowlist=False, no_hooks=False
         )
 
     def test_call__uses_pr_number(self):
@@ -170,10 +170,10 @@ class CheckoutCommandTestCase(TestCase):
         self.git.open_worktree.assert_called_once_with("feature")
         self.templates.copy.assert_called_once_with("feature")
         self.hooks.fire.assert_any_call(
-            Hook.pre_checkout, "feature", ANY, "feature", bypass_allowlist=False
+            PRE_CHECKOUT, "feature", ANY, "feature", bypass_allowlist=False, no_hooks=False
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_checkout, "feature", ANY, "feature", bypass_allowlist=False
+            POST_CHECKOUT, "feature", ANY, "feature", bypass_allowlist=False, no_hooks=False
         )
 
     def test_call__uses_pr_url(self):
@@ -189,10 +189,10 @@ class CheckoutCommandTestCase(TestCase):
         self.git.open_worktree.assert_called_once_with("feature")
         self.templates.copy.assert_called_once_with("feature")
         self.hooks.fire.assert_any_call(
-            Hook.pre_checkout, "feature", ANY, "feature", bypass_allowlist=False
+            PRE_CHECKOUT, "feature", ANY, "feature", bypass_allowlist=False, no_hooks=False
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_checkout, "feature", ANY, "feature", bypass_allowlist=False
+            POST_CHECKOUT, "feature", ANY, "feature", bypass_allowlist=False, no_hooks=False
         )
 
     def test_call__raises_on_missing_remote(self):
@@ -223,10 +223,10 @@ class CheckoutCommandTestCase(TestCase):
         self.command("1234", yes=True)
 
         self.hooks.fire.assert_any_call(
-            Hook.pre_checkout, "feature", ANY, "feature", bypass_allowlist=True
+            PRE_CHECKOUT, "feature", ANY, "feature", bypass_allowlist=True, no_hooks=False
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_checkout, "feature", ANY, "feature", bypass_allowlist=True
+            POST_CHECKOUT, "feature", ANY, "feature", bypass_allowlist=True, no_hooks=False
         )
 
     def test_call__ignores_fetch_error(self):
@@ -311,3 +311,30 @@ class CheckoutCommandTestCase(TestCase):
         )
         self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters["yes"].kind)
         self.assertEqual((bool, Arg(short="-y")), get_args(parameters["yes"].annotation))
+
+    def test_call__declares_no_hooks_as_a_keyword_only_flag(self):
+        parameter = inspect.signature(CheckoutCommand.__call__).parameters["no_hooks"]
+
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameter.kind)
+        self.assertIs(False, parameter.default)
+        self.assertIs(bool, parameter.annotation)
+
+    def test_call__no_hooks_true_forwards_to_every_hook(self):
+        self.command("feature", no_hooks=True)
+
+        self.hooks.fire.assert_any_call(
+            PRE_CHECKOUT,
+            "feature",
+            ANY,
+            "feature",
+            bypass_allowlist=False,
+            no_hooks=True,
+        )
+        self.hooks.fire.assert_any_call(
+            POST_CHECKOUT,
+            "feature",
+            ANY,
+            "feature",
+            bypass_allowlist=False,
+            no_hooks=True,
+        )

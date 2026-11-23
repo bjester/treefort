@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from treefort.command import Arg
 from treefort.commands.prune import PruneCandidate, PruneCommand
 from treefort.errors import CommandError
-from treefort.hooks import Hook
+from treefort.hooks import POST_REMOVE, PRE_REMOVE
 
 
 class StubContext:
@@ -67,16 +67,24 @@ class PruneCommandTestCase(TestCase):
     def test_call__declares_every_flag_as_keyword_only_with_a_short_flag(self):
         parameters = inspect.signature(PruneCommand.__call__).parameters
 
+        self.assertEqual({"self", "force", "yes", "no_hooks"}, set(parameters))
         self.assertEqual(
             {"force": (bool, Arg(short="-f")), "yes": (bool, Arg(short="-y"))},
             {
                 name: (get_args(parameter.annotation)[0], get_args(parameter.annotation)[1])
                 for name, parameter in parameters.items()
-                if name != "self"
+                if name in ("force", "yes")
             },
         )
-        for name in ("force", "yes"):
+        for name in ("force", "yes", "no_hooks"):
             self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters[name].kind)
+
+    def test_call__declares_no_hooks_as_a_keyword_only_long_flag(self):
+        parameters = inspect.signature(PruneCommand.__call__).parameters
+
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameters["no_hooks"].kind)
+        self.assertIs(False, parameters["no_hooks"].default)
+        self.assertIs(bool, parameters["no_hooks"].annotation)
 
     def test_call__no_worktrees_to_prune(self):
         self.git.list_worktrees.return_value = [
@@ -169,10 +177,18 @@ class PruneCommandTestCase(TestCase):
         self.git.remove_worktree.assert_called_once_with("feature-branch", force=False)
         self.git.delete_branch_if_head.assert_called_once_with("feature-branch", "abc123def456")
         self.hooks.fire.assert_any_call(
-            Hook.pre_remove, "feature-branch", "feature-branch", bypass_allowlist=False
+            PRE_REMOVE,
+            "feature-branch",
+            "feature-branch",
+            bypass_allowlist=False,
+            no_hooks=False,
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_remove, "feature-branch", "feature-branch", bypass_allowlist=False
+            POST_REMOVE,
+            "feature-branch",
+            "feature-branch",
+            bypass_allowlist=False,
+            no_hooks=False,
         )
         self.logger.info.assert_any_call("Successfully pruned 'feature-branch'")
 
@@ -198,10 +214,18 @@ class PruneCommandTestCase(TestCase):
         self.git.remove_worktree.assert_called_once_with("subpath/feature", force=False)
         self.git.delete_branch_if_head.assert_called_once_with("subpath/feature", "abc123def456")
         self.hooks.fire.assert_any_call(
-            Hook.pre_remove, "subpath/feature", "subpath-feature", bypass_allowlist=True
+            PRE_REMOVE,
+            "subpath/feature",
+            "subpath-feature",
+            bypass_allowlist=True,
+            no_hooks=False,
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_remove, "subpath/feature", "subpath-feature", bypass_allowlist=True
+            POST_REMOVE,
+            "subpath/feature",
+            "subpath-feature",
+            bypass_allowlist=True,
+            no_hooks=False,
         )
 
     def test_call__skips_reused_branch(self):
@@ -259,7 +283,7 @@ class PruneCommandTestCase(TestCase):
 
         self.git.remove_worktree.assert_called_once()
         self.hooks.fire.assert_any_call(
-            Hook.pre_remove, "auto-branch", "auto-branch", bypass_allowlist=True
+            PRE_REMOVE, "auto-branch", "auto-branch", bypass_allowlist=True, no_hooks=False
         )
 
     def test_call__force_true_passed_to_git(self):
@@ -314,11 +338,9 @@ class PruneCommandTestCase(TestCase):
 
         self.assertFalse(result)
         self.hooks.fire.assert_any_call(
-            Hook.pre_remove, "fail-branch", "fail-branch", bypass_allowlist=True
+            PRE_REMOVE, "fail-branch", "fail-branch", bypass_allowlist=True, no_hooks=False
         )
-        self.assertNotIn(
-            Hook.post_remove, [call.args[0] for call in self.hooks.fire.call_args_list]
-        )
+        self.assertNotIn(POST_REMOVE, [call.args[0] for call in self.hooks.fire.call_args_list])
         self.logger.error.assert_called_once_with(
             "Failed to prune 'fail-branch': branch deletion failed"
         )
@@ -346,4 +368,33 @@ class PruneCommandTestCase(TestCase):
         self.assertNotIn(
             "Successfully pruned 'fail-branch'",
             [call.args[0] for call in self.logger.info.call_args_list],
+        )
+
+    def test_call__no_hooks_true_forwards_to_every_hook(self):
+        wt_path = str(self.project_dir / "auto-branch")
+        (self.project_dir / "auto-branch").mkdir()
+
+        self.git.list_worktrees.return_value = [
+            {"path": wt_path, "branch": "refs/heads/auto-branch", "is_bare": False},
+        ]
+        self.git.get_branch_head.return_value = "match123"
+        self.gh.merged_pr_by_head.return_value = [
+            {"number": 1, "title": "Auto", "url": "url", "headRefOid": "match123"}
+        ]
+
+        self.command(yes=True, no_hooks=True)
+
+        self.hooks.fire.assert_any_call(
+            PRE_REMOVE,
+            "auto-branch",
+            "auto-branch",
+            bypass_allowlist=True,
+            no_hooks=True,
+        )
+        self.hooks.fire.assert_any_call(
+            POST_REMOVE,
+            "auto-branch",
+            "auto-branch",
+            bypass_allowlist=True,
+            no_hooks=True,
         )

@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 from treefort.command import Arg, Completion
 from treefort.commands.create import CreateCommand
 from treefort.git import GitRemote
-from treefort.hooks import Hook
+from treefort.hooks import POST_CREATE, PRE_CREATE
 
 
 class StubContext:
@@ -56,18 +56,20 @@ class CreateCommandTestCase(TestCase):
         self.git.add_worktree.assert_called_once_with("feature", "upstream/main")
         self.templates.copy.assert_called_once_with("feature")
         self.hooks.fire.assert_any_call(
-            Hook.pre_create,
+            PRE_CREATE,
             "feature",
             "upstream/main",
             "feature",
             bypass_allowlist=False,
+            no_hooks=False,
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_create,
+            POST_CREATE,
             "feature",
             "upstream/main",
             "feature",
             bypass_allowlist=False,
+            no_hooks=False,
         )
 
     def test_call__declares_base_ref_as_an_optional_positional(self):
@@ -96,18 +98,20 @@ class CreateCommandTestCase(TestCase):
         self.git.add_worktree.assert_called_once_with("feature", "upstream/release-x")
         self.templates.copy.assert_called_once_with("feature")
         self.hooks.fire.assert_any_call(
-            Hook.pre_create,
+            PRE_CREATE,
             "feature",
             "upstream/release-x",
             "feature",
             bypass_allowlist=False,
+            no_hooks=False,
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_create,
+            POST_CREATE,
             "feature",
             "upstream/release-x",
             "feature",
             bypass_allowlist=False,
+            no_hooks=False,
         )
 
     def test_call__respects_explicit_remote_and_ref(self):
@@ -120,18 +124,20 @@ class CreateCommandTestCase(TestCase):
         self.git.add_worktree.assert_called_once_with("feature", "alt/dev")
         self.templates.copy.assert_called_once_with("feature")
         self.hooks.fire.assert_any_call(
-            Hook.pre_create,
+            PRE_CREATE,
             "feature",
             "alt/dev",
             "feature",
             bypass_allowlist=False,
+            no_hooks=False,
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_create,
+            POST_CREATE,
             "feature",
             "alt/dev",
             "feature",
             bypass_allowlist=False,
+            no_hooks=False,
         )
 
     def test_call__handles_ref_with_slashes(self):
@@ -143,18 +149,20 @@ class CreateCommandTestCase(TestCase):
         self.git.add_worktree.assert_called_once_with("feature", "upstream/some/nested/branch")
         self.templates.copy.assert_called_once_with("feature")
         self.hooks.fire.assert_any_call(
-            Hook.pre_create,
+            PRE_CREATE,
             "feature",
             "upstream/some/nested/branch",
             "feature",
             bypass_allowlist=False,
+            no_hooks=False,
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_create,
+            POST_CREATE,
             "feature",
             "upstream/some/nested/branch",
             "feature",
             bypass_allowlist=False,
+            no_hooks=False,
         )
 
     def test_call__logs_completion_milestone(self):
@@ -193,16 +201,45 @@ class CreateCommandTestCase(TestCase):
         self.command("feature", yes=True)
 
         self.hooks.fire.assert_any_call(
-            Hook.pre_create,
+            PRE_CREATE,
             "feature",
             "upstream/main",
             "feature",
             bypass_allowlist=True,
+            no_hooks=False,
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_create,
+            POST_CREATE,
             "feature",
             "upstream/main",
             "feature",
             bypass_allowlist=True,
+            no_hooks=False,
+        )
+
+    def test_call__declares_no_hooks_as_a_keyword_only_flag(self):
+        parameter = inspect.signature(CreateCommand.__call__).parameters["no_hooks"]
+
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameter.kind)
+        self.assertIs(False, parameter.default)
+        self.assertIs(bool, parameter.annotation)
+
+    def test_call__no_hooks_true_forwards_to_every_hook(self):
+        self.command("feature", no_hooks=True)
+
+        self.hooks.fire.assert_any_call(
+            PRE_CREATE,
+            "feature",
+            "upstream/main",
+            "feature",
+            bypass_allowlist=False,
+            no_hooks=True,
+        )
+        self.hooks.fire.assert_any_call(
+            POST_CREATE,
+            "feature",
+            "upstream/main",
+            "feature",
+            bypass_allowlist=False,
+            no_hooks=True,
         )
