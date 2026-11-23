@@ -22,6 +22,7 @@ class WorktreeCommandsTestCase(TestCase):
                 "create",
                 "checkout",
                 "init",
+                "hook",
                 "install",
                 "remove",
                 "prune",

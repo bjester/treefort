@@ -2,6 +2,7 @@ from treefort import __version__
 from treefort.command import BaseCommand, Command
 from treefort.commands.checkout import CheckoutCommand
 from treefort.commands.create import CreateCommand
+from treefort.commands.hook import HookCommand
 from treefort.commands.init import InitCommand
 from treefort.commands.install import InstallCommand
 from treefort.commands.prune import PruneCommand
@@ -23,6 +24,7 @@ class WorktreeCommands(Command):
         CreateCommand,
         CheckoutCommand,
         InitCommand,
+        HookCommand,
         InstallCommand,
         RemoveCommand,
         PruneCommand,

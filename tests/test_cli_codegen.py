@@ -416,6 +416,7 @@ class BuildManifestTestCase(TestCase):
                 "aliases",
                 "checkout",
                 "create",
+                "hook",
                 "init",
                 "install",
                 "prune",
