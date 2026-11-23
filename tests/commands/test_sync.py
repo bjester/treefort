@@ -48,7 +48,7 @@ class SyncCommandTestCase(TestCase):
 
         self.hooks = SimpleNamespace(sync_from_git=Mock(return_value=2))
         self.templates = SimpleNamespace(sync_from_git=Mock(return_value=3))
-        self.git = SimpleNamespace(fetch=Mock())
+        self.git = SimpleNamespace(fetch=Mock(), remote=Mock(return_value=[]))
         self.logger = Mock()
 
         self.runtime = SimpleNamespace(
@@ -128,6 +128,31 @@ class SyncCommandTestCase(TestCase):
         self.templates.sync_from_git.assert_called_once_with(
             self.runtime.git, "upstream/release", overwrite=True
         )
+
+    def test_call__fetches_the_remote_an_explicit_ref_names(self):
+        self.git.remote.return_value = [SimpleNamespace(name="upstream")]
+
+        with patch("treefort.commands.sync.ui.spinner") as spinner:
+            SyncCommand(self.runtime)(ref="upstream/release")
+
+        self.git.fetch.assert_called_once_with("upstream")
+        spinner.assert_called_once_with("Fetching upstream...", enabled=True)
+        self.hooks.sync_from_git.assert_called_once_with(
+            self.runtime.git, "upstream/release", overwrite=True
+        )
+
+    def test_call__falls_back_to_the_default_remote_for_an_unqualified_ref(self):
+        self.git.remote.return_value = [SimpleNamespace(name="upstream")]
+
+        SyncCommand(self.runtime)(ref="main")
+
+        self.git.fetch.assert_called_once_with("origin")
+
+    def test_call__skips_the_remote_lookup_without_fetch(self):
+        SyncCommand(self.runtime)(ref="upstream/release", fetch=False)
+
+        self.git.remote.assert_not_called()
+        self.git.fetch.assert_not_called()
 
     def test_call__no_fetch_skips_the_fetch(self):
         SyncCommand(self.runtime)(fetch=False)

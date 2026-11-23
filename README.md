@@ -278,8 +278,8 @@ Files are copied byte for byte, so binary templates stay intact. Executable bits
 are preserved on both hooks and templates. Existing files are replaced. Files that exist only on
 your machine are kept.
 
-The command reads `<default_remote>/<default_branch>` unless you pass a `ref`. It fetches from the
-default remote before it reads the tree.
+The command reads `<default_remote>/<default_branch>` unless you pass a `ref`. It fetches first,
+from the remote the `ref` names when it names one, and from the default remote otherwise.
 
 - `--no-fetch`: Skip the fetch and read the ref that is already in your local repository
 
