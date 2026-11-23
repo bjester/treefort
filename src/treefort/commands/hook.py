@@ -44,7 +44,9 @@ class HookCommand(Command):
         :param worktree_name: Target worktree name for worktree hooks (defaults to current worktree)
         :param base_ref: Override the ref passed as the hook's second argument. Defaults to the
             ref the lifecycle command uses: `<remote>/<branch>` for checkout hooks and
-            `<remote>/<default_branch>` for create hooks
+            `<remote>/<default_branch>` for create hooks. A worktree checked out from a fork PR
+            needs `--base-ref <fork-remote>/<branch>` to match what `checkout` passed, because
+            nothing records which remote the checkout used
         :param yes: Run new or modified hooks without asking for confirmation
         """
         if hook_name is None or hook_name == "list":
@@ -71,13 +73,27 @@ class HookCommand(Command):
                 hook_file.name,
                 scope,
                 "yes" if os.access(hook_file, os.X_OK) else "no",
-                str(self._runtime.hooks.approval_status(hook_file)),
+                self._status(scope, hook_file),
                 str(hook_file),
             ]
             for scope, hook_file in hook_files
         ]
 
         print(ui.format_table(LIST_TABLE_HEADERS, rows))
+
+    def _status(self, scope: str, hook_file: Path) -> str:
+        """Report a hook's allowlist status, or note that a project-level hook never runs.
+
+        `pre_init` fires before the project exists, so a project-level copy is listed but cannot
+        execute. Reporting it as `global-only` keeps it discoverable without suggesting it will
+        run.
+        :param scope: The scope name the hook was found under
+        :param hook_file: The hook file to report on
+        :return: The value for the `STATUS` column
+        """
+        if scope == "project" and HOOKS[hook_file.name].skip_project:
+            return "global-only"
+        return str(self._runtime.hooks.approval_status(hook_file))
 
     def _iter_hook_dirs(self) -> Iterator[tuple[str, Path]]:
         """Yield the existing global and project hook directories with their scope name."""
@@ -111,6 +127,7 @@ class HookCommand(Command):
             project_dir=self._context.project_dir,
             resolve_remote=self._default_remote,
             resolve_worktree=self._context.current_worktree_name,
+            resolve_clone_uri=self._clone_uri,
             base_ref=base_ref,
             named_worktree=worktree_name,
         )
@@ -128,3 +145,8 @@ class HookCommand(Command):
         """Return the name of the default remote, or `None` when none matches."""
         remote = self._runtime.get_default_remote()
         return remote.name if remote else None
+
+    def _clone_uri(self) -> str | None:
+        """Return the URI the `origin` remote records, which is the one `init` cloned."""
+        remote = self._runtime.get_remote(name="origin")
+        return remote.uri if remote else None

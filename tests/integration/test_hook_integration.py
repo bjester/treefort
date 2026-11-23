@@ -9,9 +9,12 @@ the environment actually crosses the process boundary.
 import contextlib
 import hashlib
 import io
+import os
+from unittest import mock
 
 from treefort.commands.hook import HookCommand
 from treefort.commands.remove import RemoveCommand
+from treefort.git import GitUri
 
 from .base import LocalRepoIntegrationTestCase
 
@@ -92,10 +95,55 @@ class HookEnvironmentIntegrationTestCase(LocalRepoIntegrationTestCase):
 
         lines = output_file.read_text(encoding="utf-8").splitlines()
         self.assertEqual("pre_init", lines[0])
-        self.assertEqual(self.repo_name, lines[1])
+        # `init` passes the URI it clones, so `treefort hook` passes the one `origin` records.
+        # The fixture's origin is a local path, which `GitUri` reports as invalid, so the
+        # derived name follows its local-path rule rather than `repo_name`.
+        self.assertEqual(str(self.origin_dir), lines[8])
+        self.assertEqual(GitUri(str(self.origin_dir)).name, lines[1])
         self.assertEqual(str(self.project_dir.resolve()), lines[2])
         # The clone does not exist yet, so these are unset rather than empty
         self.assertEqual(["unset"] * 5, lines[3:8])
+
+    def test_hook_command__withholds_a_trefort_variable_left_in_the_environment(self):
+        # A hook that runs `treefort remove`, or a hook author who exports the variables to try
+        # a script by hand, leaves its own context in the caller's environment. The hook below
+        # must still see those slots as unset.
+        output_file = self.temp_path / "pre-init-leak.txt"
+        hook_file = self.home_dir / ".treefort" / "hooks" / "pre_init"
+        hook_file.parent.mkdir(parents=True, exist_ok=True)
+        hook_file.write_text(HOOK_SCRIPT.format(output=output_file), encoding="utf-8")
+        hook_file.chmod(0o755)
+
+        leaked = {
+            "TREEFORT_WORKTREE_NAME": "leaked-from-outer-hook",
+            "TREEFORT_BASE_REF": "origin/leaked",
+        }
+        with mock.patch.dict(os.environ, leaked):
+            HookCommand(self.runtime)("pre_init", yes=True)
+
+        lines = output_file.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(["unset"] * 5, lines[3:8])
+
+    def test_hook_command__passes_the_standard_variables_and_nothing_else(self):
+        # A hook needs enough of the caller's environment to find its tools, and nothing more
+        output_file = self.temp_path / "env.txt"
+        hook_file = self.home_dir / ".treefort" / "hooks" / "pre_init"
+        hook_file.parent.mkdir(parents=True, exist_ok=True)
+        hook_file.write_text(
+            "#!/bin/sh\n"
+            f'printf \'%s\\n\' "${{PATH-unset}}" "${{HOME-unset}}" '
+            f"\"${{GITHUB_TOKEN-unset}}\" > '{output_file}'\n",
+            encoding="utf-8",
+        )
+        hook_file.chmod(0o755)
+
+        with mock.patch.dict(os.environ, {"GITHUB_TOKEN": "secret-token"}):
+            HookCommand(self.runtime)("pre_init", yes=True)
+
+        path, home, token = output_file.read_text(encoding="utf-8").splitlines()
+        self.assertNotEqual("unset", path)
+        self.assertEqual(str(self.home_dir), home)
+        self.assertEqual("unset", token)
 
     def test_hook_command__list_reports_the_real_approval_status(self):
         approved = self.write_hook("post_create", self.temp_path / "a.txt")

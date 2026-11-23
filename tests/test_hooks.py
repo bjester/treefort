@@ -98,17 +98,21 @@ class HooksTestCase(TestCase):
         mock_check_allowed.return_value = True
         mock_stream_exec.return_value = 0
 
-        self.assertTrue(
-            self.hooks.fire(PRE_INIT, "https://github.com/octo/repo.git", self.tmp_path)
-        )
+        with mock.patch.dict(os.environ, {"PATH": "/bin", "HOME": str(self.home_dir)}, clear=True):
+            self.assertTrue(
+                self.hooks.fire(PRE_INIT, "https://github.com/octo/repo.git", self.tmp_path)
+            )
         mock_stream_exec.assert_called_once_with(
             [str(hook_file), "https://github.com/octo/repo.git", str(self.tmp_path)],
             env={
+                "PATH": "/bin",
+                "HOME": str(self.home_dir),
                 "TREEFORT_HOOK": "pre_init",
                 "TREEFORT_REPO_NAME": "repo",
                 "TREEFORT_REPO_DIR": str(self.tmp_path),
             },
             stream_info=True,
+            inherit_env=False,
         )
 
     @mock.patch.object(Hooks, "stream_exec")
@@ -149,15 +153,18 @@ class HooksTestCase(TestCase):
         mock_check_allowed.return_value = True
         mock_stream_exec.return_value = 0
 
-        self.hooks.fire(
-            PRE_INIT,
-            "https://github.com/octo/repo.git",
-            self.tmp_path,
-            env={"TREEFORT_EXTRA": "1", "TREEFORT_REPO_NAME": "override"},
-        )
+        with mock.patch.dict(os.environ, {"PATH": "/bin", "HOME": str(self.home_dir)}, clear=True):
+            self.hooks.fire(
+                PRE_INIT,
+                "https://github.com/octo/repo.git",
+                self.tmp_path,
+                env={"TREEFORT_EXTRA": "1", "TREEFORT_REPO_NAME": "override"},
+            )
 
         self.assertEqual(
             {
+                "PATH": "/bin",
+                "HOME": str(self.home_dir),
                 "TREEFORT_HOOK": "pre_init",
                 "TREEFORT_REPO_NAME": "override",
                 "TREEFORT_REPO_DIR": str(self.tmp_path),
@@ -165,6 +172,63 @@ class HooksTestCase(TestCase):
             },
             mock_stream_exec.call_args.kwargs["env"],
         )
+
+    @mock.patch.object(Hooks, "stream_exec")
+    @mock.patch.object(Hooks, "_check_allowed")
+    def test_fire__withholds_a_hook_variable_left_in_the_environment(
+        self, mock_check_allowed, mock_stream_exec
+    ):
+        # A hook that runs `treefort remove` exports its own context, and a hook author who
+        # exports the variables to try a script by hand does the same. The inner hook must not
+        # inherit either, or it reports a worktree it was never given.
+        hook_file = self.global_hooks_path / PRE_INIT.name
+        hook_file.write_bytes(b"echo ok")
+        hook_file.chmod(hook_file.stat().st_mode | stat.S_IEXEC)
+
+        mock_check_allowed.return_value = True
+        mock_stream_exec.return_value = 0
+
+        leaked = {"TREEFORT_WORKTREE_NAME": "outer", "TREEFORT_BASE_REF": "origin/outer"}
+        environ = {"PATH": "/bin", "HOME": str(self.home_dir), **leaked}
+        with mock.patch.dict(os.environ, environ, clear=True):
+            self.hooks.fire(PRE_INIT, "https://github.com/octo/repo.git", self.tmp_path)
+
+        self.assertEqual(
+            {
+                "PATH": "/bin",
+                "HOME": str(self.home_dir),
+                "TREEFORT_HOOK": "pre_init",
+                "TREEFORT_REPO_NAME": "repo",
+                "TREEFORT_REPO_DIR": str(self.tmp_path),
+            },
+            mock_stream_exec.call_args.kwargs["env"],
+        )
+
+    @mock.patch.object(Hooks, "stream_exec")
+    @mock.patch.object(Hooks, "_check_allowed")
+    def test_fire__passes_only_the_allowlisted_environment_variables(
+        self, mock_check_allowed, mock_stream_exec
+    ):
+        hook_file = self.global_hooks_path / PRE_INIT.name
+        hook_file.write_bytes(b"echo ok")
+        hook_file.chmod(hook_file.stat().st_mode | stat.S_IEXEC)
+
+        mock_check_allowed.return_value = True
+        mock_stream_exec.return_value = 0
+
+        environ = {
+            "PATH": "/bin",
+            "HOME": str(self.home_dir),
+            "GITHUB_TOKEN": "secret",
+        }
+        with mock.patch.dict(os.environ, environ, clear=True):
+            self.hooks.fire(PRE_INIT, "https://github.com/octo/repo.git", self.tmp_path)
+
+        env = mock_stream_exec.call_args.kwargs["env"]
+        self.assertEqual("/bin", env["PATH"])
+        self.assertEqual(str(self.home_dir), env["HOME"])
+        self.assertNotIn("GITHUB_TOKEN", env)
+        self.assertIs(False, mock_stream_exec.call_args.kwargs["inherit_env"])
 
     def test_build_env__pre_init_without_arguments(self):
         self.assertEqual(
@@ -455,6 +519,7 @@ class HookRequestTestCase(TestCase):
             "project_dir": self.tmp_path,
             "resolve_remote": lambda: "upstream",
             "resolve_worktree": lambda: None,
+            "resolve_clone_uri": lambda: None,
         }
         values.update(overrides)
         return HookRequest(**values)
@@ -486,6 +551,23 @@ class HookRequestTestCase(TestCase):
         request = self.request(resolve_remote=lambda: None)
 
         self.assertEqual("origin", request.default_remote_name())
+
+    def test_clone_uri__returns_the_recorded_clone_uri(self):
+        request = self.request(resolve_clone_uri=lambda: "git@github.com:octo/repo.git")
+
+        self.assertEqual("git@github.com:octo/repo.git", request.clone_uri())
+
+    def test_clone_uri__falls_back_to_the_configured_url(self):
+        request = self.request(resolve_clone_uri=lambda: None)
+
+        self.assertEqual("https://github.com/octo/repo", request.clone_uri())
+
+    def test_clone_uri__returns_empty_without_a_recorded_uri_or_configured_url(self):
+        request = self.request(
+            resolve_clone_uri=lambda: None, config=SimpleNamespace(default_branch="main")
+        )
+
+        self.assertEqual("", request.clone_uri())
 
     def test_default_branch__returns_the_configured_branch(self):
         self.assertEqual("develop", self.request().default_branch)

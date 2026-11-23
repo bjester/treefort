@@ -113,15 +113,19 @@ class SubprocessOperator(RuntimeOperator):
         return logging.getLogger(_log_name(command))
 
     @staticmethod
-    def _popen_env(env: dict[str, str] | None) -> dict[str, Any]:
+    def _popen_env(env: dict[str, str] | None, inherit_env: bool = True) -> dict[str, Any]:
         """Return the ``Popen`` keyword arguments that export ``env``.
 
         One place states the merge order: overrides win over the inherited environment, so a
-        hook still sees ``PATH`` and the caller's setup. Nothing is returned without overrides,
-        so the call site keeps its plain-inheritance form.
+        child process still sees ``PATH`` and the caller's setup. ``inherit_env`` set to
+        ``False`` exports ``env`` alone, which lets a caller decide exactly what a child sees.
+        Nothing is returned without overrides, so the call site keeps its plain-inheritance
+        form.
         """
         if env is None:
             return {}
+        if not inherit_env:
+            return {"env": dict(env)}
         return {"env": {**os.environ, **env}}
 
     def stream_exec(
@@ -130,6 +134,7 @@ class SubprocessOperator(RuntimeOperator):
         cwd: str | Path | None = None,
         env: dict[str, str] | None = None,
         stream_info: bool = False,
+        inherit_env: bool = True,
     ) -> int:
         """
         Executes a command in a subprocess and streams its output to stdout.
@@ -138,6 +143,8 @@ class SubprocessOperator(RuntimeOperator):
         :param env: Additional environment variables merged over the inherited environment
         :param stream_info: Whether to mirror output lines to the console at INFO level, indented
             in a gutter so they read as details beneath a step line
+        :param inherit_env: Whether to start from the process environment before merging `env`.
+            Set to `False` to export `env` alone
         :return: The exit code of the process
         """
         logger = self._get_command_logger(command)
@@ -153,7 +160,7 @@ class SubprocessOperator(RuntimeOperator):
             text=True,
             bufsize=1,
             cwd=cwd or self.context.cwd,
-            **self._popen_env(env),
+            **self._popen_env(env, inherit_env),
         )
         output_queue, reader_thread = _output_thread(process)
         deadline = time.monotonic() + self.wait_time

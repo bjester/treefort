@@ -117,11 +117,13 @@ class HookCommandTestCase(TestCase):
             approval_status=Mock(return_value=ApprovalStatus.UNAPPROVED),
         )
         self.logger = Mock()
+        self.origin_uri = "git@github.com:octo/repo.git"
         self.runtime = SimpleNamespace(
             context=self.context,
             hooks=self.hooks,
             logger=self.logger,
             get_default_remote=Mock(return_value=SimpleNamespace(name="origin")),
+            get_remote=Mock(return_value=SimpleNamespace(name="origin", uri=self.origin_uri)),
         )
         self.command = HookCommand(self.runtime)
 
@@ -207,6 +209,25 @@ class HookCommandTestCase(TestCase):
 
         self.assertEqual([["post_init", "project", "yes", "unapproved", str(real_hook)]], rows)
 
+    def test_call__reports_a_project_level_pre_init_as_global_only(self):
+        # `pre_init` fires before the project exists, so this copy can never run. Listing it as
+        # approved would suggest otherwise.
+        hook_file = self.write_hook(self.project_hooks_dir, "pre_init")
+        self.hooks.approval_status.return_value = ApprovalStatus.APPROVED
+
+        rows = self.listed_rows()
+
+        self.assertEqual([["pre_init", "project", "yes", "global-only", str(hook_file)]], rows)
+        self.hooks.approval_status.assert_not_called()
+
+    def test_call__reports_a_global_pre_init_with_its_approval_status(self):
+        hook_file = self.write_hook(self.global_hooks_dir, "pre_init")
+        self.hooks.approval_status.return_value = ApprovalStatus.APPROVED
+
+        rows = self.listed_rows()
+
+        self.assertEqual([["pre_init", "global", "yes", "approved", str(hook_file)]], rows)
+
     def test_call__lists_only_global_hooks_outside_a_project(self):
         global_hook = self.write_hook(self.global_hooks_dir, "pre_init")
         self.context.in_project = False
@@ -250,7 +271,7 @@ class HookCommandTestCase(TestCase):
 
         self.hooks.fire.assert_called_once_with(
             PRE_INIT,
-            "https://github.com/octo/repo",
+            self.origin_uri,
             self.project_dir,
             bypass_allowlist=False,
         )
@@ -260,11 +281,23 @@ class HookCommandTestCase(TestCase):
 
         self.hooks.fire.assert_called_once_with(
             POST_INIT,
-            "https://github.com/octo/repo",
+            self.origin_uri,
             self.project_dir,
             bypass_allowlist=False,
         )
         self.assertEqual([(self.project_dir, None)], self.context.use_calls)
+
+    def test_call__falls_back_to_the_configured_url_without_an_origin_remote(self):
+        self.runtime.get_remote.return_value = None
+
+        self.command("pre_init")
+
+        self.hooks.fire.assert_called_once_with(
+            PRE_INIT,
+            self.config.url,
+            self.project_dir,
+            bypass_allowlist=False,
+        )
 
     def test_call__runs_a_create_hook_with_the_default_base_ref(self):
         self.command("post_create", "feature/one")
@@ -337,7 +370,7 @@ class HookCommandTestCase(TestCase):
 
         self.hooks.fire.assert_called_once_with(
             POST_INIT,
-            "https://github.com/octo/repo",
+            self.origin_uri,
             self.project_dir,
             bypass_allowlist=True,
         )

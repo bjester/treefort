@@ -129,6 +129,12 @@ rather than empty.
 `pre_init` runs before the clone exists, so it receives only the first three variables.
 Positional arguments are unchanged: `$1`, `$2`, and `$3` still carry the same values.
 
+Hooks do not inherit the full caller environment. Each hook receives the `TREEFORT_*` variables
+above plus a small set of standard variables: `HOME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LOGNAME`,
+`PATH`, `SHELL`, `TERM`, `TMPDIR`, and `USER`. A `TREEFORT_*` value left in the caller's
+environment never reaches a hook, so a hook that runs `treefort` cannot pass its own context to
+the next one. Any other variable a hook needs must be set by the hook itself.
+
 <details>
 <summary><strong>Example: post_create hook</strong></summary>
 
@@ -324,14 +330,17 @@ you to approve its new checksum.
 
 Without a hook name, lists every global and project hook with its scope, whether it is
 executable, and whether its checksum is approved. Works outside a project, where only global
-hooks exist. Prints `No hooks configured.` when no hook is installed.
+hooks exist. Prints `No hooks configured.` when no hook is installed. A project-level `pre_init`
+is reported as `global-only`, because it is listed but can never run.
 
 Naming a hook runs it with the same arguments and `TREEFORT_*` environment the lifecycle command
 passes, so you can iterate on a hook without creating or removing a worktree. `pre_init` runs
 global hooks only, matching `init`. The worktree name defaults to the worktree you are in.
 
 - `--base-ref=<ref>`: Override the ref passed as the hook's second argument. Defaults to
-  `<remote>/<branch>` for `checkout` hooks and `<remote>/<default_branch>` for `create` hooks
+  `<remote>/<branch>` for `checkout` hooks and `<remote>/<default_branch>` for `create` hooks.
+  A worktree checked out from a fork PR needs `--base-ref <fork-remote>/<branch>` to match what
+  `checkout` passed, because nothing records which remote the checkout used
 - `--yes`: Run new or modified hooks without asking for confirmation
 
 </details>

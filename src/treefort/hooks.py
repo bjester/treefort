@@ -20,6 +20,25 @@ from treefort.utils import normalize_worktree_name, resolve_contained, write_byt
 
 GIT_HOOKS_DIR = ".treefort/hooks"
 
+# A hook is a user-authored script running with the user's own privileges, so withholding a
+# variable is not a security boundary. It keeps the contract honest instead: a hook sees the
+# variables treefort exports for it plus what a shell script needs to find its tools, never a
+# stale ``TREEFORT_*`` value that an outer hook or a hand-run export left in the caller.
+HOOK_ENV_PASSTHROUGH = frozenset(
+    {
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LOGNAME",
+        "PATH",
+        "SHELL",
+        "TERM",
+        "TMPDIR",
+        "USER",
+    }
+)
+
 
 def _default_branch(config: RepositoryConfig) -> str:
     """Return the configured default branch, tolerating a stub config without one.
@@ -53,6 +72,7 @@ class HookRequest:
     project_dir: Path
     resolve_remote: Callable[[], str | None]
     resolve_worktree: Callable[[], str | None]
+    resolve_clone_uri: Callable[[], str | None]
     base_ref: str | None = None
     named_worktree: str | None = None
 
@@ -73,6 +93,15 @@ class HookRequest:
     def default_remote_name(self) -> str:
         """Return the resolved default remote name, falling back to ``origin``."""
         return self.resolve_remote() or "origin"
+
+    def clone_uri(self) -> str:
+        """Return the URI ``init`` cloned, falling back to the configured URL.
+
+        ``init`` passes the normalized clone URI, which the ``origin`` remote records, so a hook
+        run through ``treefort hook`` receives the same ``$1`` the lifecycle command passes.
+        :return: The clone URI, or the configured URL when no remote records one
+        """
+        return self.resolve_clone_uri() or getattr(self.config, "url", "") or ""
 
     @property
     def default_branch(self) -> str:
@@ -140,7 +169,7 @@ class InitHook(BaseHook):
     __slots__ = ()
 
     def args(self, request: HookRequest) -> tuple[str, ...]:
-        return request.config.url or "", request.project_dir
+        return request.clone_uri(), request.project_dir
 
 
 class PreInitHook(InitHook):
@@ -311,8 +340,7 @@ class Hooks(ConfigOperator, SubprocessOperator):
         :param bypass_allowlist: Whether to bypass the allowlist check
         :param no_hooks: Whether to skip every hook without prompting or running anything
         :param env: Additional environment variables merged over the built hook environment,
-            winning on conflict. Reserved for custom hook execution (issue #132); the lifecycle
-            commands and `treefort hook` pass none.
+            winning on conflict
         :return: Whether the hook was fired
         """
         if no_hooks:
@@ -340,14 +368,29 @@ class Hooks(ConfigOperator, SubprocessOperator):
             self.logger.info(ui.step(f"Running hook {ui.bold(hook.name)}"))
             return_status = self.stream_exec(
                 [hook_file_str, *[str(arg) for arg in args]],
-                env={**hook.build_env(self.context, *args), **(env or {})},
+                env={
+                    **self._passthrough_env(),
+                    **hook.build_env(self.context, *args),
+                    **(env or {}),
+                },
                 stream_info=True,
+                inherit_env=False,
             )
             if return_status != 0:
                 tail = self._format_output_tail()
                 detail = f":{tail}" if tail else ""
                 raise HookError(f"Hook {hook.name} failed with exit code {return_status}{detail}")
         return fired
+
+    @staticmethod
+    def _passthrough_env() -> dict[str, str]:
+        """Return the standard variables a hook inherits from the caller's environment.
+
+        Everything else is withheld, so a hook cannot observe a ``TREEFORT_*`` value that
+        belongs to a different hook or to an outer invocation.
+        :return: The inherited variables present in the current environment
+        """
+        return {name: os.environ[name] for name in HOOK_ENV_PASSTHROUGH if name in os.environ}
 
     def approval_status(self, hook_file: Path) -> ApprovalStatus:
         """
