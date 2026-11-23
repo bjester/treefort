@@ -130,11 +130,15 @@ rather than empty.
 Positional arguments are unchanged: `$1`, `$2`, and `$3` still carry the same values.
 
 Hooks do not inherit the full caller environment. Each hook receives the `TREEFORT_*` variables
-above plus a small set of standard variables: `HOME`, `HTTP_PROXY`, `HTTPS_PROXY`, `LANG`,
-`LC_ALL`, `LC_CTYPE`, `LOGNAME`, `NO_PROXY`, `PATH`, `SHELL`, `TERM`, `TMPDIR`, `USER`, and
-`XDG_CONFIG_HOME`. A `TREEFORT_*` value left in the caller's environment never reaches a hook, so
-a hook that runs `treefort` cannot pass its own context to the next one. Any other variable a
-hook needs must be set by the hook itself.
+above plus these standard variables:
+
+`HOME`, `HTTP_PROXY`, `HTTPS_PROXY`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LOGNAME`, `NO_PROXY`, `PATH`,
+`SHELL`, `TERM`, `TMPDIR`, `USER`, `XDG_CONFIG_HOME`, `http_proxy`, `https_proxy`, `no_proxy`.
+
+Proxy variables are passed in both cases because curl and git accept only the lowercase
+`http_proxy`. A `TREEFORT_*` value left in the caller's environment never reaches a hook, so a
+hook that runs `treefort` cannot pass its own context to the next one. Any other variable a hook
+needs must be set by the hook itself.
 
 <details>
 <summary><strong>Example: post_create hook</strong></summary>

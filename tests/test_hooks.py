@@ -221,6 +221,7 @@ class HooksTestCase(TestCase):
             "PATH": "/bin",
             "HOME": str(self.home_dir),
             "HTTPS_PROXY": "http://proxy:3128",
+            "http_proxy": "http://proxy:3128",
             "XDG_CONFIG_HOME": "/home/dev/.config",
             "GITHUB_TOKEN": "secret",
         }
@@ -231,6 +232,8 @@ class HooksTestCase(TestCase):
         self.assertEqual("/bin", env["PATH"])
         self.assertEqual(str(self.home_dir), env["HOME"])
         self.assertEqual("http://proxy:3128", env["HTTPS_PROXY"])
+        # curl and git accept only the lowercase form for a plain http:// request
+        self.assertEqual("http://proxy:3128", env["http_proxy"])
         self.assertEqual("/home/dev/.config", env["XDG_CONFIG_HOME"])
         self.assertNotIn("GITHUB_TOKEN", env)
         self.assertIs(False, mock_stream_exec.call_args.kwargs["inherit_env"])
@@ -253,6 +256,9 @@ class HooksTestCase(TestCase):
                 "TMPDIR",
                 "USER",
                 "XDG_CONFIG_HOME",
+                "http_proxy",
+                "https_proxy",
+                "no_proxy",
             },
             set(HOOK_ENV_PASSTHROUGH),
         )

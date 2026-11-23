@@ -25,6 +25,9 @@ GIT_HOOKS_DIR = ".treefort/hooks"
 # variables treefort exports for it plus what a shell script needs to find its tools and reach
 # the network, never a stale ``TREEFORT_*`` value that an outer hook or a hand-run export left
 # in the caller.
+#
+# Proxy variables appear in both cases because curl and git accept only lowercase
+# ``http_proxy``: the uppercase form collides with CGI's ``HTTP_*`` header namespace.
 HOOK_ENV_PASSTHROUGH = frozenset(
     {
         "HOME",
@@ -41,6 +44,9 @@ HOOK_ENV_PASSTHROUGH = frozenset(
         "TMPDIR",
         "USER",
         "XDG_CONFIG_HOME",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
     }
 )
 
