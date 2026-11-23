@@ -40,12 +40,19 @@ class Templates(ConfigOperator):
         """
         config = self.context.get_config()
         worktree_dir = self.context.project_dir / worktree_name
-
-        self.replacement_map["REPO_NAME"] = config.name
-        self.replacement_map["REPO_DIR"] = str(self.context.project_dir)
-        self.replacement_map["WORKTREE_NAME"] = worktree_name
-        self.replacement_map["WORKTREE_NAME_NORMALIZED"] = normalize_worktree_name(worktree_name)
-        self.replacement_map["WORKTREE_DIR"] = str(worktree_dir)
+        values = {
+            "REPO_NAME": config.name,
+            "REPO_DIR": str(self.context.project_dir),
+            "DEFAULT_BRANCH": getattr(config, "default_branch", "main") or "main",
+            "WORKTREE_NAME": worktree_name,
+            "WORKTREE_NAME_NORMALIZED": normalize_worktree_name(worktree_name),
+            "WORKTREE_DIR": str(worktree_dir),
+        }
+        self.replacement_map.update(values)
+        # Mirror every key with the TREEFORT_ prefix a hook sees in its environment, so one name
+        # works in both a template and a hook script. Deriving the mirrors from the same mapping
+        # keeps them from drifting apart.
+        self.replacement_map.update({f"TREEFORT_{key}": value for key, value in values.items()})
 
         copied_count = 0
         for templates_dir in self.iter_config_dirs():
