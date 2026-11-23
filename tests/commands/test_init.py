@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, Mock, patch
 from treefort.command import Arg
 from treefort.commands.init import InitCommand, RepositoryTarget, normalize
 from treefort.errors import RepositoryPathError
-from treefort.hooks import Hook
+from treefort.hooks import POST_INIT, PRE_INIT
 
 
 class StubContext:
@@ -197,17 +197,18 @@ class InitCommandTestCase(TestCase):
         self.assertEqual(config.name, "repo")
 
         self.hooks.fire.assert_any_call(
-            Hook.pre_init,
+            PRE_INIT,
             "https://github.com/octo/repo.git",
             self.tmp_path / self.project_dir,
-            skip_project=True,
             bypass_allowlist=False,
+            no_hooks=False,
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_init,
+            POST_INIT,
             "https://github.com/octo/repo.git",
             self.tmp_path / self.project_dir,
             bypass_allowlist=False,
+            no_hooks=False,
         )
 
     def test_call__delegates_hook_extraction_to_sync_from_git(self):
@@ -286,15 +287,42 @@ class InitCommandTestCase(TestCase):
         command("octo/repo", str(self.project_dir), yes=True)
 
         self.hooks.fire.assert_any_call(
-            Hook.pre_init,
+            PRE_INIT,
             "https://github.com/octo/repo.git",
             self.tmp_path / self.project_dir,
-            skip_project=True,
             bypass_allowlist=True,
+            no_hooks=False,
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_init,
+            POST_INIT,
             "https://github.com/octo/repo.git",
             self.tmp_path / self.project_dir,
             bypass_allowlist=True,
+            no_hooks=False,
+        )
+
+    def test_call__declares_no_hooks_as_a_keyword_only_flag(self):
+        parameter = inspect.signature(InitCommand.__call__).parameters["no_hooks"]
+
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameter.kind)
+        self.assertIs(False, parameter.default)
+        self.assertIs(bool, parameter.annotation)
+
+    def test_call__no_hooks_true_forwards_to_every_hook(self):
+        command = InitCommand(self.runtime)
+        command("octo/repo", str(self.project_dir), no_hooks=True)
+
+        self.hooks.fire.assert_any_call(
+            PRE_INIT,
+            "https://github.com/octo/repo.git",
+            self.tmp_path / self.project_dir,
+            bypass_allowlist=False,
+            no_hooks=True,
+        )
+        self.hooks.fire.assert_any_call(
+            POST_INIT,
+            "https://github.com/octo/repo.git",
+            self.tmp_path / self.project_dir,
+            bypass_allowlist=False,
+            no_hooks=True,
         )

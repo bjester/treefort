@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from treefort.commands.sync import SyncCommand
-from treefort.hooks import Hook
+from treefort.hooks import POST_INIT
 
 from .base import LocalRepoIntegrationTestCase
 
@@ -97,33 +97,33 @@ class SyncIntegrationTestCase(LocalRepoIntegrationTestCase):
     def test_sync__modified_hook_prompts_for_approval_on_next_execution(self):
         self.commit_on_origin(
             self.default_branch,
-            {".treefort/hooks/pre_init": "#!/bin/sh\nexit 0\n"},
+            {".treefort/hooks/post_init": "#!/bin/sh\nexit 0\n"},
             "Add hook",
             mode=0o755,
         )
         self.sync()
 
         with patch("treefort.hooks.input", return_value="n") as prompt:
-            self.assertFalse(self.runtime.hooks.fire(Hook.pre_init))
+            self.assertFalse(self.runtime.hooks.fire(POST_INIT))
 
         prompt.assert_called_once()
         allowed_hooks = self.runtime.context.get_global_config().allowed_hooks
-        self.assertEqual("", allowed_hooks.get(str(self.hooks_dir() / "pre_init"), default=""))
+        self.assertEqual("", allowed_hooks.get(str(self.hooks_dir() / "post_init"), default=""))
 
     def test_sync__approved_hook_runs_and_records_its_checksum(self):
         self.commit_on_origin(
             self.default_branch,
-            {".treefort/hooks/pre_init": "#!/bin/sh\nexit 0\n"},
+            {".treefort/hooks/post_init": "#!/bin/sh\nexit 0\n"},
             "Add hook",
             mode=0o755,
         )
         self.sync()
 
         with patch("treefort.hooks.input", return_value="y"):
-            self.assertTrue(self.runtime.hooks.fire(Hook.pre_init))
+            self.assertTrue(self.runtime.hooks.fire(POST_INIT))
 
         allowed_hooks = self.runtime.context.get_global_config().allowed_hooks
-        self.assertNotEqual("", allowed_hooks.get(str(self.hooks_dir() / "pre_init"), default=""))
+        self.assertNotEqual("", allowed_hooks.get(str(self.hooks_dir() / "post_init"), default=""))
 
     def test_sync__no_fetch_reads_the_already_fetched_ref(self):
         self.commit_on_origin(

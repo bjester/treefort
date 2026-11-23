@@ -28,6 +28,7 @@ A CLI tool that helps you manage Git worktrees. Built as a GitHub CLI (`gh`) ext
   - [remove](#commands-remove)
   - [prune](#commands-prune)
   - [sync](#commands-sync)
+  - [hook](#commands-hook)
   - [install](#commands-install)
   - [shell-init](#commands-shell-init)
   - [version](#commands-version)
@@ -110,6 +111,36 @@ Execution order: global hooks first, then project hooks.
 Hooks must be executable and allowed (via checksum validation) to run.
 Treefort stores approved hook checksums in `~/.treefort/allowed_hooks.json`.
 
+**Environment variables:** every hook also receives named `TREEFORT_*` variables, so a script
+does not have to count positional arguments. A variable that does not apply to a hook is unset
+rather than empty.
+
+| Variable | Description | Hooks |
+|----------|-------------|-------|
+| `TREEFORT_HOOK` | Name of the running hook | All |
+| `TREEFORT_REPO_NAME` | Name of the git repository | All |
+| `TREEFORT_REPO_DIR` | Absolute path of the repo / project directory | All |
+| `TREEFORT_DEFAULT_BRANCH` | Default branch from the repository configuration | `post_init` and worktree hooks |
+| `TREEFORT_WORKTREE_NAME` | Name of the worktree | `create`, `checkout`, `remove` |
+| `TREEFORT_WORKTREE_NAME_NORMALIZED` | Worktree name with non-alphanumeric chars replaced by dashes | `create`, `checkout`, `remove` |
+| `TREEFORT_WORKTREE_DIR` | Absolute path of the worktree directory | `create`, `checkout`, `remove` |
+| `TREEFORT_BASE_REF` | Ref the worktree came from | `create`, `checkout` |
+
+`pre_init` runs before the clone exists, so it receives only the first three variables.
+Positional arguments are unchanged: `$1`, `$2`, and `$3` still carry the same values.
+
+Hooks do not inherit the full caller environment. Each hook receives the `TREEFORT_*` variables
+above plus these standard variables:
+
+`HOME`, `HTTP_PROXY`, `HTTPS_PROXY`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LOGNAME`, `NO_PROXY`, `PATH`,
+`SHELL`, `TERM`, `TMPDIR`, `USER`, `XDG_CONFIG_HOME`, `http_proxy`, `https_proxy`, `no_proxy`.
+
+Proxy variables are passed in both cases because curl and git accept only the lowercase
+`http_proxy`. `SSH_AUTH_SOCK` is not passed, so a hook that fetches over SSH needs a key it can
+read from disk rather than one held only in an agent. A `TREEFORT_*` value left in the caller's
+environment never reaches a hook, so a hook that runs `treefort` cannot pass its own context to
+the next one. Any other variable a hook needs must be set by the hook itself.
+
 <details>
 <summary><strong>Example: post_create hook</strong></summary>
 
@@ -118,9 +149,9 @@ A hook for this project might look something like:
 ```bash
 #!/usr/bin/env bash
 
-WORKTREE_NAME="$1"            # Full worktree name
-BASE_REF="$2"                 # Format: remote/branch
-WORKTREE_NAME_NORMALIZED="$3" # Worktree name with non-alphanumeric characters replaced by dashes
+WORKTREE_NAME="$TREEFORT_WORKTREE_NAME"                       # Same as $1
+BASE_REF="$TREEFORT_BASE_REF"                                # Same as $2, format: remote/branch
+WORKTREE_NAME_NORMALIZED="$TREEFORT_WORKTREE_NAME_NORMALIZED" # Same as $3
 
 pushd "$WORKTREE_NAME"
 
@@ -151,6 +182,11 @@ variable names to `allowed_envvars` in `~/.treefort/config.toml`.
 | `WORKTREE_NAME` | Name of the new worktree |
 | `WORKTREE_NAME_NORMALIZED` | Worktree name with non-alphanumeric chars replaced by dashes |
 | `WORKTREE_DIR` | Absolute path of the worktree directory |
+| `DEFAULT_BRANCH` | Default branch name from the repository configuration |
+
+Every provided variable is also available with a `TREEFORT_` prefix, for example
+`$TREEFORT_WORKTREE_DIR`, matching the names a hook sees in its environment. Names you add to
+`allowed_envvars` are not mirrored.
 
 <details>
 <summary><strong>Example: JetBrains project name template</strong></summary>
@@ -188,33 +224,36 @@ Run `treefort` without any arguments for usage information.
 <details>
 <summary><strong><a id="commands-init">init</a></strong> — Initialize a repository for worktrees</summary>
 
-**Spec:** `init <repository_uri> [optional_clone_dir] [--yes]`
+**Spec:** `init <repository_uri> [optional_clone_dir] [--yes] [--no-hooks]`
 
 Initializes a repository for use with worktrees. Similar to `git clone` — specify a directory name as the second argument, or it defaults to the repository name.
 
 - `--yes`: Automatically execute new or modified hooks without prompting
+- `--no-hooks`: Skip every hook without prompting or running anything
 
 </details>
 
 <details>
 <summary><strong><a id="commands-create">create</a></strong> — Create a new worktree</summary>
 
-**Spec:** `create <worktree_name> [base_ref] [--yes]`
+**Spec:** `create <worktree_name> [base_ref] [--yes] [--no-hooks]`
 
 Creates a new worktree. Defaults to the default branch of the GitHub repository. Optionally specify a base reference.
 
 - `--yes`: Automatically execute new or modified hooks without prompting
+- `--no-hooks`: Skip every hook without prompting or running anything
 
 </details>
 
 <details>
 <summary><strong><a id="commands-checkout">checkout</a></strong> — Checkout a PR or branch as a worktree</summary>
 
-**Spec:** `checkout [--remote=<name>] [--yes] <branch_name|pr_number|pr_url>`
+**Spec:** `checkout [--remote=<name>] [--yes] [--no-hooks] <branch_name|pr_number|pr_url>`
 
 Quickly create a worktree for a PR or existing branch. Works with fork PRs regardless of remote configuration.
 
 - `--yes`: Automatically execute new or modified hooks without prompting
+- `--no-hooks`: Skip every hook without prompting or running anything
 
 </details>
 
@@ -241,7 +280,7 @@ target path so you can use `cd "$(treefort switch <target>)"`.
 <details>
 <summary><strong><a id="commands-remove">remove</a></strong> — Remove a worktree</summary>
 
-**Spec:** `remove [--force] [--yes] [--delete-branch] <worktree_name>`
+**Spec:** `remove [--force] [--yes] [--delete-branch] [--no-hooks] <worktree_name>`
 
 **Aliases:** `rm`
 
@@ -249,19 +288,21 @@ Removes a worktree. Git refuses to delete worktrees with unmerged commits unless
 
 - `--delete-branch`: Delete the local Git branch associated with the worktree
 - `--yes`: Automatically execute new or modified hooks without prompting
+- `--no-hooks`: Skip every hook without prompting or running anything
 
 </details>
 
 <details>
 <summary><strong><a id="commands-prune">prune</a></strong> — Remove worktrees for merged pull requests</summary>
 
-**Spec:** `prune [--force] [--yes]`
+**Spec:** `prune [--force] [--yes] [--no-hooks]`
 
 Finds worktrees whose local branch head matches a merged GitHub pull request. Unless you use
 `--yes`, treefort prompts before it removes each worktree and local branch.
 
 - `--force`: Bypass Git safety checks when treefort removes the worktree
 - `--yes`: Skip removal prompts and execute new or modified hooks without prompting
+- `--no-hooks`: Skip every hook without prompting or running anything
 
 </details>
 
@@ -285,6 +326,28 @@ from the remote the `ref` names when it names one, and from the default remote o
 
 Synced hooks are not approved automatically. The next time a synced hook runs, treefort prompts
 you to approve its new checksum.
+
+</details>
+
+<details>
+<summary><strong><a id="commands-hook">hook</a></strong> — List or run a lifecycle hook</summary>
+
+**Spec:** `hook [hook_name] [worktree_name] [--base-ref=<ref>] [--yes]`
+
+Without a hook name, lists every global and project hook with its scope, whether it is
+executable, and whether its checksum is approved. Works outside a project, where only global
+hooks exist. Prints `No hooks configured.` when no hook is installed. A project-level `pre_init`
+is reported as `global-only`, because it is listed but can never run.
+
+Naming a hook runs it with the same arguments and `TREEFORT_*` environment the lifecycle command
+passes, so you can iterate on a hook without creating or removing a worktree. `pre_init` runs
+global hooks only, matching `init`. The worktree name defaults to the worktree you are in.
+
+- `--base-ref=<ref>`: Override the ref passed as the hook's second argument. Defaults to
+  `<remote>/<branch>` for `checkout` hooks and `<remote>/<default_branch>` for `create` hooks.
+  A worktree checked out from a fork PR needs `--base-ref <fork-remote>/<branch>` to match what
+  `checkout` passed, because nothing records which remote the checkout used
+- `--yes`: Run new or modified hooks without asking for confirmation
 
 </details>
 

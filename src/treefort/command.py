@@ -19,7 +19,7 @@ class Completion(str, Enum):
     BRANCH_REF = "branch_ref"  # local and remote git branch refs
     BASE_REF = "base_ref"  # "@ ^" + local and remote git branch refs
     REMOTE = "remote"  # git remote names
-    HOOK = "hook"  # "list" + Hook enum member names
+    HOOK = "hook"  # "list" + HOOKS keys
 
     def __str__(self) -> str:
         """Return the provider name, so formatting never depends on the Enum mixin."""

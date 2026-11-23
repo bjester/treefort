@@ -6,7 +6,7 @@ from treefort import ui
 from treefort.command import Arg, Command, Completion, command
 from treefort.errors import BranchInputError, CommandError, RemoteNotFoundError, RemoteUsageError
 from treefort.git import GitUri
-from treefort.hooks import Hook
+from treefort.hooks import POST_CHECKOUT, PRE_CHECKOUT
 from treefort.runtime import Runtime
 from treefort.utils import normalize_worktree_name
 
@@ -98,6 +98,7 @@ class CheckoutCommand(Command):
         *,
         remote: Annotated[str | None, Arg(short="-r", complete=Completion.REMOTE)] = None,
         yes: Annotated[bool, Arg(short="-y")] = False,
+        no_hooks: bool = False,
     ):
         """
         Checkout an existing branch or PR as a worktree.
@@ -118,6 +119,8 @@ class CheckoutCommand(Command):
         :param remote: If `branch_or_pr` is a branch, this may be set to choose the remote to use
         :param yes: Perform any action automatically without asking (execute new or modified hooks)
         :type yes: bool
+        :param no_hooks: Skip every hook without prompting or running anything
+        :type no_hooks: bool
         """
         self._context.assert_within_project()
 
@@ -147,20 +150,22 @@ class CheckoutCommand(Command):
 
         with self._context.use(self._context.project_dir):
             self._runtime.hooks.fire(
-                Hook.pre_checkout,
+                PRE_CHECKOUT,
                 inpt.worktree_name,
                 f"{inpt.remote}/{inpt.worktree_name}",
                 normalized_name,
                 bypass_allowlist=yes,
+                no_hooks=no_hooks,
             )
             self._runtime.git.open_worktree(inpt.worktree_name)
             self._runtime.templates.copy(inpt.worktree_name)
             self._runtime.hooks.fire(
-                Hook.post_checkout,
+                POST_CHECKOUT,
                 inpt.worktree_name,
                 f"{inpt.remote}/{inpt.worktree_name}",
                 normalized_name,
                 bypass_allowlist=yes,
+                no_hooks=no_hooks,
             )
 
             self._logger.info(

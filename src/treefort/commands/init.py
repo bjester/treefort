@@ -6,7 +6,7 @@ from treefort.command import Arg, Command, command
 from treefort.config import RepositoryConfig, TomlConfigIO
 from treefort.errors import ProjectExistsError, RepositoryPathError
 from treefort.git import GitUri
-from treefort.hooks import Hook
+from treefort.hooks import POST_INIT, PRE_INIT
 
 JUST_PATH_RE = re.compile(r"^[\w\-_]+/[\w\-_]+$")
 
@@ -65,6 +65,7 @@ class InitCommand(Command):
         destination_dir: str | None = None,
         *,
         yes: Annotated[bool, Arg(short="-y")] = False,
+        no_hooks: bool = False,
     ):
         """
         Initialize a project for using treefort with it, by cloning the project and configuring
@@ -86,6 +87,8 @@ class InitCommand(Command):
         :type destination_dir: str
         :param yes: Perform any action automatically without asking (execute new or modified hooks)
         :type yes: bool
+        :param no_hooks: Skip every hook without prompting or running anything
+        :type no_hooks: bool
         """
         repo_target = RepositoryTarget(repo, destination_dir=destination_dir)
         repo_target.validate()
@@ -100,11 +103,11 @@ class InitCommand(Command):
 
         with self._context.use(project_dir):
             self._runtime.hooks.fire(
-                Hook.pre_init,
+                PRE_INIT,
                 repo_target.uri,
                 project_dir,
-                skip_project=True,
                 bypass_allowlist=yes,
+                no_hooks=no_hooks,
             )
             with ui.spinner(f"Cloning {repo_target.uri}...", enabled=self._ui_enabled):
                 self._runtime.git.clone(repo_target.uri, ".bare")
@@ -134,10 +137,11 @@ class InitCommand(Command):
             self._add_hooks(config)
 
             self._runtime.hooks.fire(
-                Hook.post_init,
+                POST_INIT,
                 repo_target.uri,
                 project_dir,
                 bypass_allowlist=yes,
+                no_hooks=no_hooks,
             )
 
             self._logger.info(

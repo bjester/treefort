@@ -170,6 +170,64 @@ class TemplatesTestCase(unittest.TestCase):
         normalized_content = (worktree_dir / "normalized.txt").read_text()
         self.assertIn("NORMALIZED: my-feature-branch", normalized_content)
 
+    def test_copy__substitutes_default_branch(self):
+        """Test that copy provides DEFAULT_BRANCH and TREEFORT_DEFAULT_BRANCH."""
+        self.config = SimpleNamespace(name="test-repo", default_branch="develop")
+        context = self._create_context()
+        templates = Templates(context, Mock())
+
+        worktree_dir = self.project_dir / "my-worktree"
+        worktree_dir.mkdir(parents=True)
+
+        (self.project_templates_dir / "branch.txt").write_text(
+            "BRANCH: $DEFAULT_BRANCH\nPREFIXED: $TREEFORT_DEFAULT_BRANCH\n"
+        )
+
+        templates.copy("my-worktree")
+
+        content = (worktree_dir / "branch.txt").read_text()
+        self.assertIn("BRANCH: develop", content)
+        self.assertIn("PREFIXED: develop", content)
+
+    def test_copy__defaults_missing_default_branch_to_main(self):
+        """Test that copy falls back to main when the config omits default_branch."""
+        context = self._create_context()
+        templates = Templates(context, Mock())
+
+        worktree_dir = self.project_dir / "my-worktree"
+        worktree_dir.mkdir(parents=True)
+
+        (self.project_templates_dir / "branch.txt").write_text("BRANCH: $DEFAULT_BRANCH\n")
+
+        templates.copy("my-worktree")
+
+        self.assertIn("BRANCH: main", (worktree_dir / "branch.txt").read_text())
+
+    def test_copy__substitutes_treefort_prefixed_variables(self):
+        """Test that copy mirrors every key with a TREEFORT_ prefix."""
+        context = self._create_context()
+        templates = Templates(context, Mock())
+
+        worktree_dir = self.project_dir / "feat/some-feature"
+        worktree_dir.mkdir(parents=True)
+
+        (self.project_templates_dir / "prefixed.txt").write_text(
+            "REPO_NAME: $TREEFORT_REPO_NAME\n"
+            "REPO_DIR: $TREEFORT_REPO_DIR\n"
+            "WORKTREE_NAME: $TREEFORT_WORKTREE_NAME\n"
+            "WORKTREE_NAME_NORMALIZED: $TREEFORT_WORKTREE_NAME_NORMALIZED\n"
+            "WORKTREE_DIR: $TREEFORT_WORKTREE_DIR\n"
+        )
+
+        templates.copy("feat/some-feature")
+
+        content = (worktree_dir / "prefixed.txt").read_text()
+        self.assertIn("REPO_NAME: test-repo", content)
+        self.assertIn(f"REPO_DIR: {self.project_dir}", content)
+        self.assertIn("WORKTREE_NAME: feat/some-feature", content)
+        self.assertIn("WORKTREE_NAME_NORMALIZED: feat-some-feature", content)
+        self.assertIn(f"WORKTREE_DIR: {worktree_dir}", content)
+
     def test_copy__preserves_file_permissions(self):
         """Test that copy preserves file permissions."""
         executable_file = self.project_templates_dir / "script.sh"

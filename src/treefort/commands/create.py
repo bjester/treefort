@@ -2,7 +2,7 @@ from typing import Annotated
 
 from treefort import ui
 from treefort.command import Arg, Command, Completion, command
-from treefort.hooks import Hook
+from treefort.hooks import POST_CREATE, PRE_CREATE
 from treefort.utils import normalize_worktree_name
 
 
@@ -14,6 +14,7 @@ class CreateCommand(Command):
         base_ref: Annotated[str | None, Arg(complete=Completion.BASE_REF)] = None,
         *,
         yes: Annotated[bool, Arg(short="-y")] = False,
+        no_hooks: bool = False,
     ):
         """
         Create a new worktree in the current project.
@@ -34,6 +35,8 @@ class CreateCommand(Command):
         :param base_ref: The base reference to create the worktree from
         :param yes: Perform any action automatically without asking (execute new or modified hooks)
         :type yes: bool
+        :param no_hooks: Skip every hook without prompting or running anything
+        :type no_hooks: bool
         """
         self._context.assert_within_project()
         git_remote_name = None
@@ -55,20 +58,22 @@ class CreateCommand(Command):
 
         with self._context.use(self._context.project_dir):
             self._runtime.hooks.fire(
-                Hook.pre_create,
+                PRE_CREATE,
                 worktree_name,
                 f"{git_remote_name}/{base_ref}",
                 normalized_name,
                 bypass_allowlist=yes,
+                no_hooks=no_hooks,
             )
             self._runtime.git.add_worktree(worktree_name, f"{git_remote_name}/{base_ref}")
             self._runtime.templates.copy(worktree_name)
             self._runtime.hooks.fire(
-                Hook.post_create,
+                POST_CREATE,
                 worktree_name,
                 f"{git_remote_name}/{base_ref}",
                 normalized_name,
                 bypass_allowlist=yes,
+                no_hooks=no_hooks,
             )
 
             self._logger.info(

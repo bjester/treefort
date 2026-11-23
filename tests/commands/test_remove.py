@@ -10,7 +10,7 @@ from unittest.mock import Mock, call, patch
 from treefort.command import Arg, Completion
 from treefort.commands.remove import RemoveCommand
 from treefort.errors import CommandError, WorktreeNotFoundError
-from treefort.hooks import Hook
+from treefort.hooks import POST_REMOVE, PRE_REMOVE
 
 
 class StubContext:
@@ -60,6 +60,10 @@ class RemoveCommandTestCase(TestCase):
     def test_call__declares_the_cli_contract(self):
         parameters = inspect.signature(RemoveCommand.__call__).parameters
 
+        self.assertEqual(
+            {"self", "worktree_name", "force", "yes", "delete_branch", "no_hooks"},
+            set(parameters),
+        )
         self.assertIs(inspect.Parameter.POSITIONAL_OR_KEYWORD, parameters["worktree_name"].kind)
         self.assertEqual(
             (str, Arg(complete=Completion.WORKTREE)),
@@ -74,9 +78,16 @@ class RemoveCommandTestCase(TestCase):
             {
                 name: (get_args(parameter.annotation)[0], get_args(parameter.annotation)[1])
                 for name, parameter in parameters.items()
-                if name != "self" and name != "worktree_name"
+                if name in ("force", "yes", "delete_branch")
             },
         )
+
+    def test_call__declares_no_hooks_as_a_keyword_only_long_flag(self):
+        parameter = inspect.signature(RemoveCommand.__call__).parameters["no_hooks"]
+
+        self.assertIs(inspect.Parameter.KEYWORD_ONLY, parameter.kind)
+        self.assertIs(False, parameter.default)
+        self.assertIs(bool, parameter.annotation)
 
     def test_call__raises_when_missing(self):
         with self.assertRaisesRegex(WorktreeNotFoundError, "Worktree missing does not exist"):
@@ -100,10 +111,10 @@ class RemoveCommandTestCase(TestCase):
         self.git.remove_worktree.assert_called_once_with("feature", force=True)
         self.git.delete_branch.assert_called_once_with("feature", force=True)
         self.hooks.fire.assert_any_call(
-            Hook.pre_remove, "feature", "feature", bypass_allowlist=False
+            PRE_REMOVE, "feature", "feature", bypass_allowlist=False, no_hooks=False
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_remove, "feature", "feature", bypass_allowlist=False
+            POST_REMOVE, "feature", "feature", bypass_allowlist=False, no_hooks=False
         )
 
     def test_call__deletes_branch_associated_with_mismatched_worktree(self):
@@ -133,10 +144,10 @@ class RemoveCommandTestCase(TestCase):
             self.fail(f"Missing expected call: {matched}")
 
         pre_remove = call.hooks.fire(
-            Hook.pre_remove, "custom-dir", "custom-dir", bypass_allowlist=False
+            PRE_REMOVE, "custom-dir", "custom-dir", bypass_allowlist=False, no_hooks=False
         )
         post_remove = call.hooks.fire(
-            Hook.post_remove, "custom-dir", "custom-dir", bypass_allowlist=False
+            POST_REMOVE, "custom-dir", "custom-dir", bypass_allowlist=False, no_hooks=False
         )
 
         sequence = [
@@ -175,7 +186,7 @@ class RemoveCommandTestCase(TestCase):
 
         self.git.remove_worktree.assert_not_called()
         self.hooks.fire.assert_called_once_with(
-            Hook.pre_remove, "feature", "feature", bypass_allowlist=False
+            PRE_REMOVE, "feature", "feature", bypass_allowlist=False, no_hooks=False
         )
 
     def test_call__does_not_list_worktrees_without_delete_branch(self):
@@ -200,7 +211,7 @@ class RemoveCommandTestCase(TestCase):
             "Failed to delete branch 'feature/my-feature': boom"
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_remove, "custom-dir", "custom-dir", bypass_allowlist=False
+            POST_REMOVE, "custom-dir", "custom-dir", bypass_allowlist=False, no_hooks=False
         )
 
     def test_call__logs_removal_milestone(self):
@@ -243,8 +254,28 @@ class RemoveCommandTestCase(TestCase):
         self.command("feature", yes=True)
 
         self.hooks.fire.assert_any_call(
-            Hook.pre_remove, "feature", "feature", bypass_allowlist=True
+            PRE_REMOVE, "feature", "feature", bypass_allowlist=True, no_hooks=False
         )
         self.hooks.fire.assert_any_call(
-            Hook.post_remove, "feature", "feature", bypass_allowlist=True
+            POST_REMOVE, "feature", "feature", bypass_allowlist=True, no_hooks=False
+        )
+
+    def test_call__no_hooks_true_forwards_to_every_hook(self):
+        self.add_worktree("feature")
+
+        self.command("feature", no_hooks=True)
+
+        self.hooks.fire.assert_any_call(
+            PRE_REMOVE,
+            "feature",
+            "feature",
+            bypass_allowlist=False,
+            no_hooks=True,
+        )
+        self.hooks.fire.assert_any_call(
+            POST_REMOVE,
+            "feature",
+            "feature",
+            bypass_allowlist=False,
+            no_hooks=True,
         )

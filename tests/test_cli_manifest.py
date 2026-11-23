@@ -377,7 +377,7 @@ class PackagedLayoutTestCase(TestCase):
 
             self.assertEqual("", result.stderr, result.stderr)
             self.assertEqual(
-                "['aliases', 'checkout', 'create', 'init', 'install',"
+                "['aliases', 'checkout', 'create', 'hook', 'init', 'install',"
                 " 'prune', 'remove', 'shell-init', 'switch', 'sync', 'version']",
                 result.stdout.strip(),
             )
