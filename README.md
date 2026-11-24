@@ -231,7 +231,8 @@ raw = [
 - Naming a directory under `cow` or `raw` applies to the files inside it.
 
 Symlinks inside `templates/` that resolve outside the templates directory are skipped with a
-warning. Symlinks inside a pruned `cow` directory are preserved as links without dereferencing.
+warning. Symlinks nested inside a matching `cow` directory skip that check and are copied as links
+without being dereferenced, even when they point outside the templates directory.
 If a template directory targets an existing symlink in the worktree, treefort logs a warning and
 skips that directory.
 
