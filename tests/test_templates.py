@@ -997,10 +997,28 @@ class TemplatesTestCase(unittest.TestCase):
         templates = Templates(self._create_context(), Mock())
         link_a = self.project_templates_dir / "loop_a"
         link_b = self.project_templates_dir / "loop_b"
+        via_loop = self.project_templates_dir / "via_loop"
         link_a.symlink_to("loop_b")
         link_b.symlink_to("loop_a")
+        via_loop.symlink_to("loop_a/missing")
 
         self.assertFalse(templates._is_safe_template_path(link_a, self.project_templates_dir))
+        self.assertFalse(templates._is_safe_template_path(via_loop, self.project_templates_dir))
+
+    def test_is_safe_template_path__handles_dangling_internal_and_escaping_symlinks(self):
+        """Test that dangling symlinks stay allowed when contained and rejected when escaping."""
+        templates = Templates(self._create_context(), Mock())
+        dangling_internal = self.project_templates_dir / "dangling_internal"
+        dangling_escaping = self.project_templates_dir / "dangling_escaping"
+        dangling_internal.symlink_to("missing_target.txt")
+        dangling_escaping.symlink_to("../missing_outside.txt")
+
+        self.assertTrue(
+            templates._is_safe_template_path(dangling_internal, self.project_templates_dir)
+        )
+        self.assertFalse(
+            templates._is_safe_template_path(dangling_escaping, self.project_templates_dir)
+        )
 
     def test_copy__raw_patterns_preserve_literal_variables_and_permissions(self):
         """Test that raw patterns copy files verbatim without substitution and keep mode."""

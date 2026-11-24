@@ -439,7 +439,12 @@ class Templates(ConfigOperator):
         if not path.is_symlink():
             return True
         try:
-            resolved_path = path.resolve()
+            # Resolve with strict=True first so circular symlinks raise OSError(ELOOP) on
+            # Python 3.13+, where strict=False stops traversing loops and returns the link path.
+            try:
+                resolved_path = path.resolve(strict=True)
+            except FileNotFoundError:
+                resolved_path = path.resolve(strict=False)
             resolved_root = templates_root.resolve()
         except (OSError, RuntimeError):
             return False
