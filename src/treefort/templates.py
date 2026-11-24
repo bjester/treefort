@@ -107,6 +107,17 @@ class BaseTemplate(ABC):
 class RawTemplate(BaseTemplate):
     """Copy a template file or symlink verbatim without variable substitution."""
 
+    def matches(self, relative_path: Path) -> bool:
+        """Check whether ``relative_path`` or an ancestor directory matches a raw pattern.
+
+        :param relative_path: Path relative to the templates root directory.
+        :type relative_path: Path
+        :return: ``True`` if ``relative_path`` or any ancestor directory matches.
+        :rtype: bool
+        """
+        candidates = (relative_path, *list(relative_path.parents)[:-1])
+        return any(BaseTemplate.matches(self, candidate) for candidate in candidates)
+
     def copy(self, src_path: Path, dest_path: Path) -> None:
         """Copy a template file or symlink verbatim without variable substitution.
 
@@ -195,7 +206,12 @@ class SubstituteTemplate(BaseTemplate):
 
 
 class CowTemplate(BaseTemplate):
-    """Copy a template file, symlink, or directory using OS Copy-on-Write reflinks."""
+    """Copy a template file, symlink, or directory using OS Copy-on-Write reflinks.
+
+    Matching directories are copied as one subtree, so nested symlinks are copied as links
+    without the ``templates_dir`` containment check that ``Templates._walk_templates``
+    applies to the entries it visits.
+    """
 
     copies_directories: bool = True
 
@@ -222,29 +238,29 @@ class CowTemplate(BaseTemplate):
             str(dest_path),
         ]
 
-    @classmethod
-    def _merge_directory(cls, src_dir: Path, dest_dir: Path) -> None:
+    def _merge_directory(self, src_dir: Path, dest_dir: Path) -> None:
         """Recursively merge a source directory into an existing destination directory.
 
         Preserves symlinks, unlinks overwritten destination symlinks so targets are never
-        clobbered, and fails fast if a destination directory path is a symlink.
+        clobbered, and warns and skips when a destination directory path is a symlink.
 
         :param src_dir: Source template directory to merge from.
         :type src_dir: Path
         :param dest_dir: Destination directory inside the worktree to merge into.
         :type dest_dir: Path
-        :raises FileExistsError: If ``dest_dir`` is an existing symlink or non-directory file.
+        :raises FileExistsError: If ``dest_dir`` is an existing non-directory file.
         :raises IsADirectoryError: If a non-directory entry collides with an existing directory.
         """
         if dest_dir.is_symlink():
-            raise FileExistsError(f"Destination path is a symlink: {dest_dir}")
+            self.logger.warning(f"Skipping template directory {dest_dir}: destination is a symlink")
+            return
         dest_dir.mkdir(parents=True, exist_ok=True)
         for entry in sorted(src_dir.iterdir()):
             target = dest_dir / entry.name
             if not entry.is_symlink() and entry.is_dir():
-                cls._merge_directory(entry, target)
+                self._merge_directory(entry, target)
                 continue
-            cls._prepare_non_dir_destination(entry, target)
+            self._prepare_non_dir_destination(entry, target)
             shutil.copy2(entry, target, follow_symlinks=False)
         shutil.copystat(src_dir, dest_dir)
 
@@ -289,7 +305,7 @@ class CowTemplate(BaseTemplate):
         :type src_path: Path
         :param dest_path: Destination path inside the worktree.
         :type dest_path: Path
-        :raises FileExistsError: If a directory source targets an existing symlink or file.
+        :raises FileExistsError: If a directory source targets an existing non-directory file.
         :raises IsADirectoryError: If a non-directory source targets an existing real directory.
         """
         is_real_dir = not src_path.is_symlink() and src_path.is_dir()
@@ -472,13 +488,13 @@ class Templates(ConfigOperator):
             relative_path = entry_path.relative_to(walk_ctx.templates_dir)
             dest_path = walk_ctx.worktree_dir / relative_path
             handler = walk_ctx.resolve_handler(relative_path)
-            if (
-                not entry_path.is_symlink()
-                and entry_path.is_dir()
-                and not handler.copies_directories
-            ):
-                if dest_path.is_symlink():
-                    raise FileExistsError(f"Destination path is a symlink: {dest_path}")
+            is_real_dir = not entry_path.is_symlink() and entry_path.is_dir()
+            if is_real_dir and dest_path.is_symlink():
+                self.logger.warning(
+                    f"Skipping template directory {relative_path}: destination is a symlink"
+                )
+                continue
+            if is_real_dir and not handler.copies_directories:
                 dest_path.mkdir(parents=True, exist_ok=True)
                 copied_count += self._walk_templates(entry_path, walk_ctx)
                 continue

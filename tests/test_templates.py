@@ -87,6 +87,18 @@ class RawTemplateTestCase(unittest.TestCase):
         self.assertFalse(empty_only.matches(Path("config.txt")))
         self.assertTrue(mixed.matches(Path("scripts/run.sh")))
 
+    def test_matches__matches_descendants_of_matched_directory(self):
+        """Test that raw directory patterns also match nested files inside those directories."""
+        template = RawTemplate(self.logger, patterns=["scripts", "bin/", "*.png"])
+
+        self.assertTrue(template.matches(Path("scripts")))
+        self.assertTrue(template.matches(Path("scripts/run.sh")))
+        self.assertTrue(template.matches(Path("scripts/a/b.sh")))
+        self.assertTrue(template.matches(Path("bin/tool")))
+        self.assertTrue(template.matches(Path("x/y.png")))
+        self.assertFalse(template.matches(Path("other/run.sh")))
+        self.assertFalse(template.matches(Path("run.sh")))
+
     def test_copy__copies_file_verbatim_and_preserves_permissions(self):
         """Test that copy writes files verbatim without variable substitution and keeps mode."""
         src_file = self.src_dir / "deploy.sh"
@@ -526,8 +538,8 @@ class CowTemplateTestCase(unittest.TestCase):
         self.assertTrue((dest_cache / "link_over_file").is_symlink())
         self.assertEqual((dest_cache / "link_over_file").readlink(), Path("new_target.txt"))
 
-    def test_copy__raises_when_directory_targets_existing_symlink(self):
-        """Test that copy fails fast when a directory targets an existing or broken symlink."""
+    def test_copy__skips_and_warns_when_directory_targets_existing_symlink(self):
+        """Test that copy warns and skips when a directory targets an existing or broken symlink."""
         template = CowTemplate(self.logger)
 
         src_cache = self.src_dir / ".cache"
@@ -543,12 +555,21 @@ class CowTemplateTestCase(unittest.TestCase):
         dest_broken_link = self.dest_dir / "broken_link"
         dest_broken_link.symlink_to("nonexistent_target")
 
-        with self.assertRaises(FileExistsError):
-            template.copy(src_cache, dest_dir_link)
+        template.copy(src_cache, dest_dir_link)
         self.assertFalse((victim_dir / "item.txt").exists())
+        self.assertTrue(dest_dir_link.is_symlink())
 
-        with self.assertRaises(FileExistsError):
-            template.copy(src_cache, dest_broken_link)
+        template.copy(src_cache, dest_broken_link)
+        self.assertTrue(dest_broken_link.is_symlink())
+
+        warnings = [call.args[0] for call in self.logger.warning.call_args_list]
+        self.assertEqual(
+            warnings,
+            [
+                f"Skipping template directory {dest_dir_link}: destination is a symlink",
+                f"Skipping template directory {dest_broken_link}: destination is a symlink",
+            ],
+        )
 
     def test_copy__raises_when_non_dir_destination_is_existing_directory(self):
         """Test that copy fails fast with IsADirectoryError for non-dir over real dir."""
@@ -1130,20 +1151,61 @@ class TemplatesTestCase(unittest.TestCase):
             "STATE: $WORKTREE_NAME\n",
         )
 
-    def test_copy__raises_when_regular_directory_targets_existing_symlink(self):
-        """Test that non-COW directory traversal refuses to write through a destination symlink."""
+    def test_copy__raw_directory_pattern_copies_nested_files_verbatim(self):
+        """Test that naming a directory under raw copies all nested files without expansion."""
+        nested_dir = self.project_templates_dir / "scripts" / "sub"
+        nested_dir.mkdir(parents=True)
+        (nested_dir / "run.sh").write_text("echo ${WORKTREE_NAME}\n")
+
+        self.config = SimpleNamespace(name="test-repo", template_raw_patterns=["scripts"])
+        templates = Templates(self._create_context(), Mock())
+
+        worktree_dir = self.project_dir / "my-worktree"
+        worktree_dir.mkdir(parents=True)
+
+        with patch("treefort.ui.is_color_enabled", return_value=False):
+            templates.copy("my-worktree")
+
+        self.assertEqual(
+            (worktree_dir / "scripts" / "sub" / "run.sh").read_text(),
+            "echo ${WORKTREE_NAME}\n",
+        )
+        templates.logger.info.assert_called_once_with("✓ Copied 4 template(s)")
+
+    def test_copy__skips_and_warns_when_directory_targets_existing_symlink(self):
+        """Test that directory copies warn and skip destination symlinks without aborting copy."""
         victim_dir = self.tmp_path / "victim_dir"
         victim_dir.mkdir()
+        cow_victim_dir = self.tmp_path / "cow_victim_dir"
+        cow_victim_dir.mkdir()
 
+        cache_dir = self.project_templates_dir / ".cache"
+        cache_dir.mkdir()
+        (cache_dir / "state.bin").write_bytes(b"\x00STATE")
+
+        self.config = SimpleNamespace(name="test-repo", template_cow_patterns=[".cache"])
         templates = Templates(self._create_context(), Mock())
         worktree_dir = self.project_dir / "my-worktree"
         worktree_dir.mkdir(parents=True)
         (worktree_dir / "subdir").symlink_to(victim_dir, target_is_directory=True)
+        (worktree_dir / ".cache").symlink_to(cow_victim_dir, target_is_directory=True)
 
-        with self.assertRaises(FileExistsError):
+        with patch("treefort.ui.is_color_enabled", return_value=False):
             templates.copy("my-worktree")
 
         self.assertFalse((victim_dir / "nested.txt").exists())
+        self.assertFalse((cow_victim_dir / "state.bin").exists())
+        self.assertTrue((worktree_dir / "config.txt").exists())
+        self.assertTrue((worktree_dir / "env.txt").exists())
+        warnings = [call.args[0] for call in templates.logger.warning.call_args_list]
+        self.assertEqual(
+            warnings,
+            [
+                "Skipping template directory .cache: destination is a symlink",
+                "Skipping template directory subdir: destination is a symlink",
+            ],
+        )
+        templates.logger.info.assert_called_once_with("✓ Copied 2 template(s)")
 
     def test_copy__falls_back_to_raw_for_binary_file_with_null_bytes(self):
         """Test that valid-UTF-8 payloads containing NUL bytes trigger binary raw fallback."""
@@ -1203,7 +1265,15 @@ class TemplatesTestCase(unittest.TestCase):
         self.assertFalse((worktree_dir / "evil_file.txt").is_symlink())
         self.assertFalse((worktree_dir / "evil_dir").exists())
         self.assertFalse((worktree_dir / "evil_dir").is_symlink())
-        self.assertEqual(templates.logger.warning.call_count, 2)
+        prefix = "Skipping template symlink outside templates directory:"
+        warnings = [call.args[0] for call in templates.logger.warning.call_args_list]
+        self.assertEqual(
+            warnings,
+            [
+                f"{prefix} {self.project_templates_dir / 'evil_dir'}",
+                f"{prefix} {self.project_templates_dir / 'evil_file.txt'}",
+            ],
+        )
         templates.logger.info.assert_called_once_with("✓ Copied 3 template(s)")
 
     def test_copy__preserves_internal_file_and_dir_symlinks_without_recursing(self):
