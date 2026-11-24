@@ -188,6 +188,54 @@ Every provided variable is also available with a `TREEFORT_` prefix, for example
 `$TREEFORT_WORKTREE_DIR`, matching the names a hook sees in its environment. Names you add to
 `allowed_envvars` are not mirrored.
 
+**Copy modes (`[templates]`):**
+
+By default, treefort copies text templates with variable substitution. Binary files that contain
+a NUL byte (`\x00`) in their first 8192 bytes, or files that are not valid UTF-8, fall back to a
+verbatim raw copy automatically.
+
+To copy files or directories with Copy-on-Write reflinks or verbatim without substitution, add a
+`[templates]` table to `~/.treefort/config.toml` or `.treefort/config.toml`:
+
+```toml
+[templates]
+cow = [
+    ".cache",
+    "node_modules",
+    "*.db",
+]
+raw = [
+    "scripts",
+    "*.png",
+]
+```
+
+- **`cow`**: Copies matching files, symlinks, and directories with Copy-on-Write reflinks
+  (`cp --reflink=auto` on Linux, `cp -Rc` on macOS). Matching directories copy as one subtree
+  without walking nested files in Python. Existing destination directories merge without nesting,
+  and filesystems without reflink support fall back to standard copies.
+- **`raw`**: Copies matching files and directories verbatim without `${VAR}` substitution.
+- **Precedence**: `cow` takes precedence over `raw`, and unmatched files use variable
+  substitution. Patterns from `~/.treefort/config.toml` and `.treefort/config.toml` combine into
+  one list per mode.
+
+**Pattern matching rules:**
+
+- Each pattern matches a template's relative POSIX path or basename with case-sensitive
+  `fnmatchcase`, or with `Path.match`.
+- `*` matches across `/`, so `scripts/*.sh` also matches `scripts/sub/run.sh`.
+- `**/*.db` requires a parent directory and does not match a top-level `a.db`. Use `*.db` to
+  match at any depth.
+- Leading slashes do not match (for example, `/build` never matches), while trailing slashes do
+  (for example, `build/` matches `build`).
+- Naming a directory under `cow` or `raw` applies to the files inside it.
+
+Symlinks inside `templates/` that resolve outside the templates directory are skipped with a
+warning. Symlinks nested inside a matching `cow` directory skip that check and are copied as links
+without being dereferenced, even when they point outside the templates directory.
+If a template directory targets an existing symlink in the worktree, treefort logs a warning and
+skips that directory.
+
 <details>
 <summary><strong>Example: JetBrains project name template</strong></summary>
 

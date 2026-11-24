@@ -6,6 +6,7 @@ concrete reader and writer implementations for both JSON and TOML formats.
 
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -237,6 +238,56 @@ class SettingsConfig(Config):
         if not isinstance(raw, bool):
             raise ConfigTypeError(f"verbose must be a boolean, got {type(raw).__name__}")
         return raw
+
+    def _template_patterns(self, key: str) -> list[str]:
+        """Read and validate a pattern list under the ``[templates]`` table.
+
+        :param key: Entry name inside the ``[templates]`` table (e.g. ``"cow"`` or ``"raw"``).
+        :type key: str
+        :returns: A shallow copy of the configured string pattern list, or ``[]`` when unset.
+        :rtype: list[str]
+        :raises ConfigTypeError: If ``templates`` is not a mapping, the target entry is not a
+            list, or any entry element is not a string.
+        """
+        table = self._data.get("templates")
+        if table is None:
+            return []
+        if not isinstance(table, Mapping):
+            raise ConfigTypeError(f"templates must be a table, got {type(table).__name__}")
+
+        raw = table.get(key, [])
+        if not isinstance(raw, list):
+            raise ConfigTypeError(
+                f"templates.{key} must be a list of strings, got {type(raw).__name__}"
+            )
+        patterns: list[str] = []
+        for item in raw:
+            if not isinstance(item, str):
+                raise ConfigTypeError(
+                    f"templates.{key} entries must be strings, got {type(item).__name__}"
+                )
+            patterns.append(str(item))
+        return patterns
+
+    @property
+    def template_cow_patterns(self) -> list[str]:
+        """Glob patterns for template files copied with copy-on-write semantics.
+
+        :returns: Copy-on-write template pattern list from ``[templates].cow``.
+        :rtype: list[str]
+        :raises ConfigTypeError: If ``[templates]`` or ``[templates].cow`` has an invalid type.
+        """
+        return self._template_patterns("cow")
+
+    @property
+    def template_raw_patterns(self) -> list[str]:
+        """Glob patterns for template files copied verbatim without rendering.
+
+        :returns: Raw template pattern list from ``[templates].raw``.
+        :rtype: list[str]
+        :raises ConfigTypeError: If ``[templates]`` or ``[templates].raw`` has an invalid type.
+        """
+        return self._template_patterns("raw")
 
 
 class GlobalConfig(SettingsConfig):
